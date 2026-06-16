@@ -11,15 +11,15 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "Premium Finance",
-    template: "%s | Premium Finance",
+    default: "NOXOMOR Ledger",
+    template: "%s | NOXOMOR Ledger",
   },
   description: "Pusat kendali keuangan pribadi yang cerdas dan terintegrasi.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Premium Finance",
+    title: "NOXOMOR Ledger",
   },
 };
 

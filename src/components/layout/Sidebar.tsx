@@ -15,7 +15,8 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { cn, getInitials } from "@/utils";
-import { mockUser } from "@/lib/mock-data";
+import { createClient } from "@/lib/supabase/client";
+import { useEffect, useState } from "react";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -33,17 +34,38 @@ const bottomItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [userName, setUserName] = useState("User");
+
+  useEffect(() => {
+    async function getUser() {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const name = user.user_metadata?.full_name || user.email?.split("@")[0] || "User";
+        setUserName(name);
+      }
+    }
+    getUser();
+  }, []);
+
+  async function handleLogout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }
 
   return (
     <aside className="hidden md:flex w-60 flex-col bg-surface-low border-r border-border shrink-0">
       {/* Logo */}
       <div className="h-14 flex items-center gap-2.5 px-5 border-b border-border">
-        <div className="w-7 h-7 rounded-md bg-text-primary flex items-center justify-center shrink-0">
-          <span className="text-background font-bold text-xs">PF</span>
-        </div>
+        <img
+          src="/icons/logo.png"
+          alt="NOXOMOR"
+          className="w-7 h-7 rounded-md object-cover shrink-0"
+        />
         <div>
-          <p className="text-sm font-semibold text-text-primary leading-tight">Premium Finance</p>
-          <p className="text-[10px] text-accent uppercase tracking-widest">Enterprise Tier</p>
+          <p className="text-sm font-semibold text-text-primary leading-tight">NOXOMOR Ledger</p>
+          <p className="text-[10px] text-accent uppercase tracking-widest">Personal Finance</p>
         </div>
       </div>
 
@@ -90,15 +112,18 @@ export function Sidebar() {
         })}
 
         {/* User */}
-        <div className="flex items-center gap-3 px-3 py-2 mt-2 rounded-md hover:bg-surface/60 transition-colors cursor-pointer group">
+        <div
+          onClick={handleLogout}
+          className="flex items-center gap-3 px-3 py-2 mt-2 rounded-md hover:bg-surface/60 transition-colors cursor-pointer group"
+        >
           <div className="w-7 h-7 rounded-full bg-surface flex items-center justify-center border border-border shrink-0">
             <span className="text-xs font-medium text-text-secondary">
-              {getInitials(mockUser.full_name)}
+              {getInitials(userName)}
             </span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm text-text-primary font-medium truncate">{mockUser.full_name}</p>
-            <p className="text-[10px] text-accent truncate">Admin Access</p>
+            <p className="text-sm text-text-primary font-medium truncate">{userName}</p>
+            <p className="text-[10px] text-accent truncate">Klik untuk logout</p>
           </div>
           <LogOut size={14} className="text-accent group-hover:text-danger transition-colors" />
         </div>
