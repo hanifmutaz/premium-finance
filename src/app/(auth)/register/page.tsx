@@ -43,7 +43,7 @@ export default function RegisterPage() {
       toast.success("Cek email kamu untuk verifikasi akun!");
       router.push("/login");
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Registrasi gagal");
+      toast.error("Registrasi gagal");
     } finally {
       setLoading(false);
     }
