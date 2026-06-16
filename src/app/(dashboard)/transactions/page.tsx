@@ -1,11 +1,14 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { Plus, Search, Filter, Download, ArrowUpRight, ArrowDownLeft, CreditCard, ArrowLeftRight } from "lucide-react";
+import { useState, useMemo, useEffect } from "react";
+import { Plus, Search, Download, ArrowUpRight, ArrowDownLeft, CreditCard, ArrowLeftRight, Trash2 } from "lucide-react";
 import { formatCurrency, formatDate, cn } from "@/utils";
-import { StatusBadge, TypeBadge } from "@/components/shared/Badges";
+import { StatusBadge } from "@/components/shared/Badges";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { mockTransactions } from "@/lib/mock-data";
+import { TransactionFormModal } from "@/components/transactions/TransactionFormModal";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { getTransactions, deleteTransaction } from "@/lib/db";
+import { toast } from "sonner";
 import type { Transaction, TransactionType } from "@/types";
 
 const typeFilters: { label: string; value: TransactionType | "all" }[] = [
@@ -13,7 +16,6 @@ const typeFilters: { label: string; value: TransactionType | "all" }[] = [
   { label: "Pemasukan", value: "income" },
   { label: "Pengeluaran", value: "expense" },
   { label: "Bayar Utang", value: "debt_payment" },
-  { label: "Transfer", value: "transfer" },
 ];
 
 const typeIcon = {
@@ -24,47 +26,60 @@ const typeIcon = {
 };
 
 export default function TransactionsPage() {
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<TransactionType | "all">("all");
+  const [showForm, setShowForm] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const data = await getTransactions();
+      setTransactions(data);
+    } catch { toast.error("Gagal memuat transaksi"); }
+    finally { setLoading(false); }
+  }
+
+  useEffect(() => { load(); }, []);
 
   const filtered = useMemo(() => {
-    return mockTransactions.filter((tx) => {
-      const matchSearch =
-        search === "" ||
-        tx.name.toLowerCase().includes(search.toLowerCase()) ||
-        tx.category?.name.toLowerCase().includes(search.toLowerCase());
+    return transactions.filter((tx) => {
+      const matchSearch = search === "" || tx.name.toLowerCase().includes(search.toLowerCase());
       const matchType = typeFilter === "all" || tx.type === typeFilter;
       return matchSearch && matchType;
     });
-  }, [search, typeFilter]);
+  }, [transactions, search, typeFilter]);
 
-  const totals = useMemo(() => {
-    const income = filtered.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
-    const expense = filtered.filter((t) => t.type !== "income").reduce((s, t) => s + t.amount, 0);
-    return { income, expense };
-  }, [filtered]);
+  const totals = useMemo(() => ({
+    income: filtered.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0),
+    expense: filtered.filter((t) => t.type !== "income").reduce((s, t) => s + t.amount, 0),
+  }), [filtered]);
+
+  async function handleDelete(id: string) {
+    try {
+      await deleteTransaction(id);
+      toast.success("Transaksi dihapus");
+      load();
+    } catch { toast.error("Gagal menghapus"); }
+  }
 
   return (
     <div className="space-y-5">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-text-primary">Transaksi</h1>
-          <p className="text-sm text-text-secondary mt-0.5">{filtered.length} transaksi ditemukan</p>
+          <p className="text-sm text-text-secondary mt-0.5">{filtered.length} transaksi</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-md text-xs text-text-secondary hover:text-text-primary hover:border-accent transition-colors">
-            <Download size={13} />
-            Export
-          </button>
-          <button className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold hover:bg-text-primary/90 transition-colors">
-            <Plus size={13} />
-            Tambah Transaksi
-          </button>
-        </div>
+        <button
+          onClick={() => setShowForm(true)}
+          className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold hover:bg-text-primary/90 transition-colors"
+        >
+          <Plus size={13} /> Tambah Transaksi
+        </button>
       </div>
 
-      {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3">
         <div className="stat-card">
           <p className="text-xs text-text-secondary uppercase tracking-wider">Total Pemasukan</p>
@@ -76,9 +91,7 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
-        {/* Search */}
         <div className="relative flex-1">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
           <input
@@ -88,8 +101,7 @@ export default function TransactionsPage() {
             className="w-full bg-surface border border-border rounded-md pl-8 pr-3 py-2 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent transition-colors"
           />
         </div>
-        {/* Type filter */}
-        <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+        <div className="flex gap-1.5 overflow-x-auto">
           {typeFilters.map(({ label, value }) => (
             <button
               key={value}
@@ -107,74 +119,64 @@ export default function TransactionsPage() {
         </div>
       </div>
 
-      {/* Table */}
       <div className="card-base overflow-hidden">
-        {/* Desktop header */}
-        <div className="hidden md:grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-4 px-5 py-3 border-b border-border">
-          {["TRANSAKSI", "TANGGAL", "METODE", "STATUS", "NOMINAL"].map((h) => (
-            <span key={h} className="text-[10px] font-semibold text-accent uppercase tracking-widest">
-              {h}
-            </span>
-          ))}
-        </div>
-
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="py-12 text-center text-text-secondary text-sm">Memuat...</div>
+        ) : filtered.length === 0 ? (
           <EmptyState
             icon={ArrowLeftRight}
-            title="Tidak ada transaksi"
-            description="Coba ubah filter atau tambah transaksi baru."
+            title="Belum ada transaksi"
+            description="Tambah transaksi pertama kamu."
+            action={
+              <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold">
+                <Plus size={13} /> Tambah Transaksi
+              </button>
+            }
           />
         ) : (
           <div className="divide-y divide-border">
-            {filtered.map((tx) => (
-              <TransactionRow key={tx.id} tx={tx} />
-            ))}
+            {filtered.map((tx) => {
+              const isIncome = tx.type === "income";
+              return (
+                <div key={tx.id} className="flex items-center gap-3 px-5 py-3.5 hover:bg-surface/30 transition-colors group">
+                  <div className="w-8 h-8 rounded-lg bg-surface flex items-center justify-center shrink-0 border border-border">
+                    {typeIcon[tx.type] ?? typeIcon.transfer}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-text-primary truncate">{tx.name}</p>
+                    <p className="text-xs text-text-secondary">{tx.category?.name ?? "—"} · {formatDate(tx.date)}</p>
+                  </div>
+                  <StatusBadge status={tx.status} size="sm" />
+                  <span className={cn("text-sm font-semibold tabular-nums", isIncome ? "text-success" : "text-text-primary")}>
+                    {isIncome ? "+" : "-"}{formatCurrency(tx.amount)}
+                  </span>
+                  <button
+                    onClick={() => setDeleteId(tx.id)}
+                    className="opacity-0 group-hover:opacity-100 text-accent hover:text-danger transition-all ml-1"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
-    </div>
-  );
-}
 
-function TransactionRow({ tx }: { tx: Transaction }) {
-  const isIncome = tx.type === "income";
-  return (
-    <div className="grid grid-cols-[1fr_auto] md:grid-cols-[2fr_1fr_1fr_1fr_auto] gap-3 md:gap-4 items-center px-5 py-3.5 hover:bg-surface/30 transition-colors cursor-pointer group">
-      {/* Name + type */}
-      <div className="flex items-center gap-3 min-w-0">
-        <div className="w-8 h-8 rounded-lg bg-surface flex items-center justify-center shrink-0 border border-border group-hover:border-accent transition-colors">
-          {typeIcon[tx.type]}
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-text-primary truncate">{tx.name}</p>
-          <p className="text-xs text-text-secondary truncate">
-            {tx.category?.name ?? "—"} · {tx.description ?? ""}
-          </p>
-        </div>
-      </div>
+      <TransactionFormModal
+        open={showForm}
+        onClose={() => { setShowForm(false); load(); }}
+      />
 
-      {/* Date */}
-      <span className="text-xs text-text-secondary tabular-nums hidden md:block">
-        {formatDate(tx.date, "dd MMM yyyy")}
-      </span>
-
-      {/* Method */}
-      <span className="text-xs text-text-secondary capitalize hidden md:block">
-        {tx.payment_method.replace("_", " ")}
-      </span>
-
-      {/* Status */}
-      <div className="hidden md:flex">
-        <StatusBadge status={tx.status} size="sm" />
-      </div>
-
-      {/* Amount */}
-      <span className={cn(
-        "text-sm font-semibold tabular-nums text-right",
-        isIncome ? "text-success" : "text-text-primary"
-      )}>
-        {isIncome ? "+" : "-"}{formatCurrency(tx.amount)}
-      </span>
+      <ConfirmDialog
+        open={!!deleteId}
+        title="Hapus Transaksi?"
+        description="Transaksi ini akan dihapus permanen dan tidak bisa dikembalikan."
+        confirmLabel="Hapus"
+        confirmVariant="danger"
+        onConfirm={() => deleteId && handleDelete(deleteId)}
+        onClose={() => setDeleteId(null)}
+      />
     </div>
   );
 }
