@@ -25,44 +25,22 @@ export default function RegisterPage() {
     }
 
     setLoading(true);
-
-    // Demo mode
-    async function handleRegister(e: React.FormEvent) {
-      e.preventDefault();
-      if (form.password !== form.confirm) {
-        toast.error("Password tidak cocok");
-        return;
-      }
-      if (form.password.length < 8) {
-        toast.error("Password minimal 8 karakter");
-        return;
-      }
-
-      setLoading(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
+        options: { data: { full_name: form.name } },
+      });
+      if (error) throw error;
       toast.success("Akun berhasil dibuat! Silakan login.");
       router.push("/login");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Registrasi gagal";
+      toast.error(msg);
+    } finally {
       setLoading(false);
     }
-    // toast.success("Akun berhasil dibuat! Silakan login.");
-    // router.push("/login");
-    // setLoading(false);
-    // return;
-
-    // try {
-    //   const supabase = createClient();
-    //   const { error } = await supabase.auth.signUp({
-    //     email: form.email,
-    //     password: form.password,
-    //     options: { data: { full_name: form.name } },
-    //   });
-    //   if (error) throw error;
-    //   toast.success("Cek email kamu untuk verifikasi akun!");
-    //   router.push("/login");
-    // } catch (err: unknown) {
-    //   toast.error("Registrasi gagal");
-    // } finally {
-    //   setLoading(false);
-    // }
   }
 
   return (

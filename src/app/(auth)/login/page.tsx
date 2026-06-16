@@ -2,13 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
@@ -18,23 +16,15 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
 
-    // Demo mode: bypass auth
-    if (email === "demo@premium.finance" || email.length > 0) {
-      toast.success("Login berhasil! Selamat datang.");
-      window.location.href = "/dashboard";
-      return;
-    }
-
     try {
       const supabase = createClient();
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      router.push("/dashboard");
       toast.success("Login berhasil!");
+      window.location.href = "/dashboard";
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Login gagal";
       toast.error(msg);
-    } finally {
       setLoading(false);
     }
   }
@@ -62,9 +52,6 @@ export default function LoginPage() {
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="block text-sm text-text-secondary">Password</label>
-            <Link href="/forgot-password" className="text-xs text-accent hover:text-text-secondary transition-colors">
-              Lupa password?
-            </Link>
           </div>
           <div className="relative">
             <input
@@ -101,13 +88,6 @@ export default function LoginPage() {
           <Link href="/register" className="text-text-primary hover:underline font-medium">
             Daftar sekarang
           </Link>
-        </p>
-      </div>
-
-      {/* Demo hint */}
-      <div className="mt-4 p-3 bg-surface rounded-md border border-border">
-        <p className="text-xs text-text-secondary text-center">
-          <span className="text-accent font-medium">Demo mode:</span> masukkan email apapun untuk masuk
         </p>
       </div>
     </div>
