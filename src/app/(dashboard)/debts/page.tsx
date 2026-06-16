@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
 import { Plus, CreditCard, CheckCircle2, AlertCircle, Trash2 } from "lucide-react";
@@ -138,7 +139,7 @@ export default function DebtsPage() {
                   {(isOverdue || isDueSoon) && <AlertCircle size={12} />}
                   {isOverdue ? `Sudah jatuh tempo ${Math.abs(days)} hari lalu`
                     : isDueSoon ? `Jatuh tempo ${days} hari lagi — ${formatDate(debt.due_date)}`
-                    : `Jatuh tempo: ${formatDate(debt.due_date)}`}
+                      : `Jatuh tempo: ${formatDate(debt.due_date)}`}
                 </div>
 
                 {debt.status === "active" && (
