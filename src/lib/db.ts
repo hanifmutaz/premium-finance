@@ -5,6 +5,7 @@ const supabase = createClient();
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 async function getUserId(): Promise<string> {
+  const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
   return user.id;
@@ -12,6 +13,7 @@ async function getUserId(): Promise<string> {
 
 // ─── Seed default categories ──────────────────────────────────────────────────
 export async function seedDefaultCategories(userId: string) {
+  const supabase = createClient();
   const { data: existing } = await supabase
     .from("categories")
     .select("id")
@@ -50,6 +52,7 @@ export async function getTransactions(filters?: {
   limit?: number;
 }) {
   const userId = await getUserId();
+
   let query = supabase
     .from("transactions")
     .select("*, category:categories(*)")
@@ -98,6 +101,7 @@ export async function deleteTransaction(id: string) {
 
 // ─── Debts ────────────────────────────────────────────────────────────────────
 export async function getDebts() {
+  const supabase = createClient();
   const userId = await getUserId();
   const { data, error } = await supabase
     .from("debts")
@@ -109,6 +113,7 @@ export async function getDebts() {
 }
 
 export async function addDebt(debt: Omit<Debt, "id" | "user_id" | "total_paid" | "remaining" | "created_at" | "updated_at">) {
+  const supabase = createClient();
   const userId = await getUserId();
   const { data, error } = await supabase
     .from("debts")
@@ -126,6 +131,7 @@ export async function deleteDebt(id: string) {
 
 // ─── Goals ────────────────────────────────────────────────────────────────────
 export async function getGoals() {
+  const supabase = createClient();
   const userId = await getUserId();
   const { data, error } = await supabase
     .from("goals")
@@ -137,6 +143,7 @@ export async function getGoals() {
 }
 
 export async function addGoal(goal: Omit<Goal, "id" | "user_id" | "current_amount" | "created_at" | "updated_at">) {
+  const supabase = createClient();
   const userId = await getUserId();
   const { data, error } = await supabase
     .from("goals")
@@ -148,6 +155,7 @@ export async function addGoal(goal: Omit<Goal, "id" | "user_id" | "current_amoun
 }
 
 export async function updateGoalAmount(id: string, amount: number) {
+  const supabase = createClient();
   const { data, error } = await supabase
     .from("goals")
     .update({ current_amount: amount })
@@ -159,12 +167,14 @@ export async function updateGoalAmount(id: string, amount: number) {
 }
 
 export async function deleteGoal(id: string) {
+  const supabase = createClient();
   const { error } = await supabase.from("goals").delete().eq("id", id);
   if (error) throw error;
 }
 
 // ─── Wishlist ─────────────────────────────────────────────────────────────────
 export async function getWishlist() {
+  const supabase = createClient();
   const userId = await getUserId();
   const { data, error } = await supabase
     .from("wishlists")
@@ -176,6 +186,7 @@ export async function getWishlist() {
 }
 
 export async function addWishlistItem(item: Omit<Wishlist, "id" | "user_id" | "saved_amount" | "created_at" | "updated_at">) {
+  const supabase = createClient();
   const userId = await getUserId();
   const { data, error } = await supabase
     .from("wishlists")
@@ -193,6 +204,7 @@ export async function deleteWishlistItem(id: string) {
 
 // ─── Dashboard stats ──────────────────────────────────────────────────────────
 export async function getDashboardStats() {
+  const supabase = createClient();
   const userId = await getUserId();
 
   // Seed categories if first time
@@ -251,6 +263,7 @@ export async function getDashboardStats() {
 
 // ─── Monthly chart data ───────────────────────────────────────────────────────
 export async function getMonthlyChartData() {
+  const supabase = createClient();
   const userId = await getUserId();
   const months = [];
 
@@ -279,6 +292,7 @@ export async function getMonthlyChartData() {
 
 // ─── Categories ───────────────────────────────────────────────────────────────
 export async function getCategories(type?: "income" | "expense") {
+  const supabase = createClient();
   const userId = await getUserId();
   let query = supabase
     .from("categories")
