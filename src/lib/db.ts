@@ -5,6 +5,7 @@ const supabase = createClient();
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 async function getUserId(): Promise<string> {
+  if (typeof window === "undefined") throw new Error("Server side");
   const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
