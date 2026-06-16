@@ -21,7 +21,7 @@ export default function LoginPage() {
     // Demo mode: bypass auth
     if (email === "demo@premium.finance" || email.length > 0) {
       toast.success("Login berhasil! Selamat datang.");
-      router.push("/dashboard");
+      window.location.href = "/dashboard";
       return;
     }
 
