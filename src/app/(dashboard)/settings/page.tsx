@@ -1,11 +1,11 @@
 "use client";
-export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
 import { User, Bell, Shield, Database, ChevronRight, Save, Loader2 } from "lucide-react";
 import { cn, getInitials } from "@/utils";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+export const dynamic = "force-dynamic";
 
 const settingsSections = [
   { id: "profile", label: "Profil", icon: User },

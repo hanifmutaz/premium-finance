@@ -1,6 +1,4 @@
 "use client";
-export const dynamic = "force-dynamic";
-
 import { useEffect, useState } from "react";
 import { DashboardStatCards } from "@/components/dashboard/StatCards";
 import { IncomeExpenseChart, BalanceTrendChart, DebtTrendChart, CategoryPieChart } from "@/components/dashboard/Charts";
@@ -12,6 +10,7 @@ import { StatCardSkeleton } from "@/components/shared/Skeleton";
 import { getDashboardStats, getMonthlyChartData, getDebts, getGoals, getTransactions } from "@/lib/db";
 import { calculateHealthScore } from "@/lib/calculations";
 import type { DashboardStats, MonthlyChartData, Debt, Goal, Transaction } from "@/types";
+export const dynamic = "force-dynamic";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);

@@ -1,5 +1,4 @@
 "use client";
-export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
 import { Plus, CreditCard, CheckCircle2, AlertCircle, Trash2 } from "lucide-react";
@@ -12,6 +11,7 @@ import { DebtPaymentModal } from "@/components/debts/DebtPaymentModal";
 import { getDebts, deleteDebt } from "@/lib/db";
 import { toast } from "sonner";
 import type { Debt } from "@/types";
+export const dynamic = "force-dynamic";
 
 export default function DebtsPage() {
   const [debts, setDebts] = useState<Debt[]>([]);
