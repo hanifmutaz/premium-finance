@@ -152,6 +152,25 @@ create table if not exists public.forecast_snapshots (
   created_at          timestamptz not null default now()
 );
 
+-- ─── PUSH SUBSCRIPTIONS ──────────────────────────────────────────────────────
+create table if not exists public.push_subscriptions (
+  id              uuid primary key default uuid_generate_v4(),
+  user_id         uuid references public.profiles(id) on delete cascade not null,
+  endpoint        text not null unique,
+  p256dh          text not null,
+  auth            text not null,
+  user_agent      text,
+  created_at      timestamptz not null default now()
+);
+
+alter table public.push_subscriptions enable row level security;
+
+create policy "push_subscriptions_own" on public.push_subscriptions
+  for all using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create index if not exists idx_push_subscriptions_user on public.push_subscriptions(user_id);
+
 -- ─── SETTINGS ────────────────────────────────────────────────────────────────
 create table if not exists public.settings (
   id                    uuid primary key default uuid_generate_v4(),

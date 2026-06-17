@@ -2,10 +2,11 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
-import { User, Bell, Shield, Database, ChevronRight, Save, Loader2 } from "lucide-react";
+import { User, Bell, Shield, Database, ChevronRight, Save, Loader2, Smartphone, BellRing, BellOff } from "lucide-react";
 import { cn, getInitials } from "@/utils";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
+import { isPushSupported, getPushPermissionStatus, subscribeToPush, unsubscribeFromPush, isSubscribed } from "@/lib/push-notifications";
 
 const settingsSections = [
   { id: "profile", label: "Profil", icon: User },
@@ -145,6 +146,9 @@ export default function SettingsPage() {
                 <h2 className="text-base font-semibold text-text-primary mb-1">Pengaturan Notifikasi</h2>
                 <p className="text-sm text-text-secondary">Atur reminder dan notifikasi sistem</p>
               </div>
+
+              <PushNotificationCard />
+
               <div className="space-y-4">
                 {[
                   { label: "Jatuh tempo utang", desc: "Notifikasi 7 hari sebelum jatuh tempo", defaultOn: true },
@@ -222,6 +226,110 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function PushNotificationCard() {
+  const [status, setStatus] = useState<NotificationPermission | "unsupported" | "loading">("loading");
+  const [subscribed, setSubscribed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    async function check() {
+      const perm = await getPushPermissionStatus();
+      setStatus(perm);
+      if (perm === "granted") {
+        setSubscribed(await isSubscribed());
+      }
+    }
+    check();
+  }, []);
+
+  async function handleEnable() {
+    setBusy(true);
+    try {
+      const success = await subscribeToPush();
+      if (success) {
+        setSubscribed(true);
+        setStatus("granted");
+        toast.success("Notifikasi HP berhasil diaktifkan!");
+      } else {
+        toast.error("Izin notifikasi ditolak. Aktifkan dari pengaturan browser.");
+        setStatus("denied");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Gagal mengaktifkan notifikasi");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDisable() {
+    setBusy(true);
+    try {
+      await unsubscribeFromPush();
+      setSubscribed(false);
+      toast.success("Notifikasi HP dimatikan");
+    } catch {
+      toast.error("Gagal menonaktifkan notifikasi");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (status === "unsupported") {
+    return (
+      <div className="p-4 bg-surface rounded-lg border border-border flex items-center gap-3">
+        <BellOff size={18} className="text-accent shrink-0" />
+        <div>
+          <p className="text-sm text-text-primary font-medium">Browser tidak mendukung</p>
+          <p className="text-xs text-text-secondary mt-0.5">
+            Gunakan Chrome/Safari terbaru, atau install sebagai PWA di HP kamu.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn(
+      "p-4 rounded-lg border flex items-center justify-between gap-3",
+      subscribed ? "bg-success/5 border-success/30" : "bg-surface border-border"
+    )}>
+      <div className="flex items-center gap-3">
+        <div className={cn(
+          "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
+          subscribed ? "bg-success/10" : "bg-surface-card"
+        )}>
+          {subscribed ? <BellRing size={16} className="text-success" /> : <Smartphone size={16} className="text-text-secondary" />}
+        </div>
+        <div>
+          <p className="text-sm text-text-primary font-medium">Notifikasi Push ke HP</p>
+          <p className="text-xs text-text-secondary mt-0.5">
+            {subscribed
+              ? "Aktif — kamu akan menerima notifikasi langsung di HP"
+              : status === "denied"
+              ? "Izin ditolak. Aktifkan manual dari pengaturan browser/HP."
+              : "Terima notifikasi jatuh tempo & reminder langsung di HP"}
+          </p>
+        </div>
+      </div>
+      {status !== "denied" && (
+        <button
+          onClick={subscribed ? handleDisable : handleEnable}
+          disabled={busy}
+          className={cn(
+            "text-xs px-3 py-1.5 rounded-md font-medium transition-colors shrink-0 flex items-center gap-1.5",
+            subscribed
+              ? "border border-border text-text-secondary hover:border-danger hover:text-danger"
+              : "bg-text-primary text-background hover:bg-text-primary/90"
+          )}
+        >
+          {busy && <Loader2 size={12} className="animate-spin" />}
+          {subscribed ? "Matikan" : "Aktifkan"}
+        </button>
+      )}
     </div>
   );
 }

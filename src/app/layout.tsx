@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "@/styles/globals.css";
 import { Toaster } from "sonner";
+import { ServiceWorkerRegister } from "@/components/shared/ServiceWorkerRegister";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -39,6 +40,7 @@ export default function RootLayout({
     <html lang="id" className="dark">
       <body className={`${inter.variable} font-sans bg-background text-text-primary min-h-screen`}>
         {children}
+        <ServiceWorkerRegister />
         <Toaster
           theme="dark"
           position="top-right"
