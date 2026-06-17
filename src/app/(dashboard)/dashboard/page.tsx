@@ -1,4 +1,5 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import { DashboardStatCards } from "@/components/dashboard/StatCards";
 import { IncomeExpenseChart, BalanceTrendChart, DebtTrendChart, CategoryPieChart } from "@/components/dashboard/Charts";
@@ -10,7 +11,6 @@ import { StatCardSkeleton } from "@/components/shared/Skeleton";
 import { getDashboardStats, getMonthlyChartData, getDebts, getGoals, getTransactions } from "@/lib/db";
 import { calculateHealthScore } from "@/lib/calculations";
 import type { DashboardStats, MonthlyChartData, Debt, Goal, Transaction } from "@/types";
-export const dynamic = "force-dynamic";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -73,7 +73,7 @@ export default function DashboardPage() {
 
   // Debt trend dari debts
   const debtTrend = debts.slice(0, 6).map((_, i) => ({
-    month: ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun"][i] ?? "—",
+    month: ["Jan","Feb","Mar","Apr","Mei","Jun"][i] ?? "—",
     total: stats.total_active_debt,
   }));
 

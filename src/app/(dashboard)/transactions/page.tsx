@@ -2,7 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useMemo, useEffect } from "react";
-import { Plus, Search, Download, ArrowUpRight, ArrowDownLeft, CreditCard, ArrowLeftRight, Trash2 } from "lucide-react";
+import { Plus, Search, ArrowUpRight, ArrowDownLeft, CreditCard, ArrowLeftRight, Trash2 } from "lucide-react";
 import { formatCurrency, formatDate, cn } from "@/utils";
 import { StatusBadge } from "@/components/shared/Badges";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -36,10 +36,8 @@ export default function TransactionsPage() {
 
   async function load() {
     setLoading(true);
-    try {
-      const data = await getTransactions();
-      setTransactions(data);
-    } catch { toast.error("Gagal memuat transaksi"); }
+    try { setTransactions(await getTransactions()); }
+    catch { toast.error("Gagal memuat transaksi"); }
     finally { setLoading(false); }
   }
 
@@ -59,11 +57,8 @@ export default function TransactionsPage() {
   }), [filtered]);
 
   async function handleDelete(id: string) {
-    try {
-      await deleteTransaction(id);
-      toast.success("Transaksi dihapus");
-      load();
-    } catch { toast.error("Gagal menghapus"); }
+    try { await deleteTransaction(id); toast.success("Transaksi dihapus"); load(); }
+    catch { toast.error("Gagal menghapus"); }
   }
 
   return (
@@ -73,10 +68,8 @@ export default function TransactionsPage() {
           <h1 className="text-lg font-semibold text-text-primary">Transaksi</h1>
           <p className="text-sm text-text-secondary mt-0.5">{filtered.length} transaksi</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold hover:bg-text-primary/90 transition-colors"
-        >
+        <button onClick={() => setShowForm(true)}
+          className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold hover:bg-text-primary/90 transition-colors">
           <Plus size={13} /> Tambah Transaksi
         </button>
       </div>
@@ -95,25 +88,15 @@ export default function TransactionsPage() {
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Cari transaksi..."
-            className="w-full bg-surface border border-border rounded-md pl-8 pr-3 py-2 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent transition-colors"
-          />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari transaksi..."
+            className="w-full bg-surface border border-border rounded-md pl-8 pr-3 py-2 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent transition-colors" />
         </div>
         <div className="flex gap-1.5 overflow-x-auto">
           {typeFilters.map(({ label, value }) => (
-            <button
-              key={value}
-              onClick={() => setTypeFilter(value)}
-              className={cn(
-                "px-3 py-2 rounded-md text-xs font-medium whitespace-nowrap transition-colors",
-                typeFilter === value
-                  ? "bg-text-primary text-background"
-                  : "border border-border text-text-secondary hover:border-accent hover:text-text-primary"
-              )}
-            >
+            <button key={value} onClick={() => setTypeFilter(value)}
+              className={cn("px-3 py-2 rounded-md text-xs font-medium whitespace-nowrap transition-colors",
+                typeFilter === value ? "bg-text-primary text-background" : "border border-border text-text-secondary hover:border-accent hover:text-text-primary"
+              )}>
               {label}
             </button>
           ))}
@@ -124,10 +107,7 @@ export default function TransactionsPage() {
         {loading ? (
           <div className="py-12 text-center text-text-secondary text-sm">Memuat...</div>
         ) : filtered.length === 0 ? (
-          <EmptyState
-            icon={ArrowLeftRight}
-            title="Belum ada transaksi"
-            description="Tambah transaksi pertama kamu."
+          <EmptyState icon={ArrowLeftRight} title="Belum ada transaksi" description="Tambah transaksi pertama kamu."
             action={
               <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold">
                 <Plus size={13} /> Tambah Transaksi
@@ -151,10 +131,8 @@ export default function TransactionsPage() {
                   <span className={cn("text-sm font-semibold tabular-nums", isIncome ? "text-success" : "text-text-primary")}>
                     {isIncome ? "+" : "-"}{formatCurrency(tx.amount)}
                   </span>
-                  <button
-                    onClick={() => setDeleteId(tx.id)}
-                    className="opacity-0 group-hover:opacity-100 text-accent hover:text-danger transition-all ml-1"
-                  >
+                  <button onClick={() => setDeleteId(tx.id)}
+                    className="opacity-0 group-hover:opacity-100 text-accent hover:text-danger transition-all ml-1">
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -164,20 +142,10 @@ export default function TransactionsPage() {
         )}
       </div>
 
-      <TransactionFormModal
-        open={showForm}
-        onClose={() => { setShowForm(false); load(); }}
-      />
-
-      <ConfirmDialog
-        open={!!deleteId}
-        title="Hapus Transaksi?"
-        description="Transaksi ini akan dihapus permanen dan tidak bisa dikembalikan."
-        confirmLabel="Hapus"
-        confirmVariant="danger"
-        onConfirm={() => deleteId && handleDelete(deleteId)}
-        onClose={() => setDeleteId(null)}
-      />
+      <TransactionFormModal open={showForm} onClose={() => { setShowForm(false); load(); }} />
+      <ConfirmDialog open={!!deleteId} title="Hapus Transaksi?" description="Transaksi ini akan dihapus permanen dan tidak bisa dikembalikan."
+        confirmLabel="Hapus" confirmVariant="danger"
+        onConfirm={() => deleteId && handleDelete(deleteId)} onClose={() => setDeleteId(null)} />
     </div>
   );
 }

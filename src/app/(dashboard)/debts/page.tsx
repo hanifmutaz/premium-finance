@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
 import { Plus, CreditCard, CheckCircle2, AlertCircle, Trash2 } from "lucide-react";
@@ -8,10 +9,10 @@ import { ProgressBar } from "@/components/shared/ProgressBar";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { DebtPaymentModal } from "@/components/debts/DebtPaymentModal";
+import { DebtFormModal } from "@/components/debts/DebtFormModal";
 import { getDebts, deleteDebt } from "@/lib/db";
 import { toast } from "sonner";
 import type { Debt } from "@/types";
-export const dynamic = "force-dynamic";
 
 export default function DebtsPage() {
   const [debts, setDebts] = useState<Debt[]>([]);
@@ -19,6 +20,7 @@ export default function DebtsPage() {
   const [tab, setTab] = useState<"active" | "completed">("active");
   const [payDebt, setPayDebt] = useState<Debt | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -32,7 +34,6 @@ export default function DebtsPage() {
   const active = debts.filter((d) => d.status === "active");
   const completed = debts.filter((d) => d.status === "completed");
   const displayed = tab === "active" ? active : completed;
-
   const totalDebt = active.reduce((s, d) => s + Number(d.remaining), 0);
   const totalPaid = active.reduce((s, d) => s + Number(d.total_paid), 0);
 
@@ -48,6 +49,10 @@ export default function DebtsPage() {
           <h1 className="text-lg font-semibold text-text-primary">Manajemen Utang</h1>
           <p className="text-sm text-text-secondary mt-0.5">{active.length} utang aktif</p>
         </div>
+        <button onClick={() => setShowForm(true)}
+          className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold hover:bg-text-primary/90 transition-colors">
+          <Plus size={13} /> Tambah Utang
+        </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -79,7 +84,15 @@ export default function DebtsPage() {
       {loading ? (
         <div className="py-12 text-center text-text-secondary text-sm">Memuat...</div>
       ) : displayed.length === 0 ? (
-        <EmptyState icon={CreditCard} title="Belum ada utang" description="Tidak ada utang di kategori ini." />
+        <EmptyState icon={CreditCard} title="Belum ada utang"
+          description={tab === "active" ? "Tambah utang pertama kamu." : "Belum ada utang yang lunas."}
+          action={tab === "active" ? (
+            <button onClick={() => setShowForm(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold">
+              <Plus size={13} /> Tambah Utang
+            </button>
+          ) : undefined}
+        />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {displayed.map((debt) => {
@@ -92,8 +105,7 @@ export default function DebtsPage() {
                 <div className="flex items-start justify-between gap-3 mb-4">
                   <div className="flex items-center gap-3">
                     <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
-                      debt.status === "completed" ? "bg-success/10" : "bg-surface"
-                    )}>
+                      debt.status === "completed" ? "bg-success/10" : "bg-surface")}>
                       {debt.status === "completed"
                         ? <CheckCircle2 size={16} className="text-success" />
                         : <CreditCard size={16} className="text-text-secondary" />}
@@ -134,12 +146,11 @@ export default function DebtsPage() {
                 </div>
 
                 <div className={cn("flex items-center gap-2 p-2.5 rounded-md text-xs",
-                  isOverdue ? "bg-danger/10 text-danger" : isDueSoon ? "bg-warning/10 text-warning" : "bg-surface text-text-secondary"
-                )}>
+                  isOverdue ? "bg-danger/10 text-danger" : isDueSoon ? "bg-warning/10 text-warning" : "bg-surface text-text-secondary")}>
                   {(isOverdue || isDueSoon) && <AlertCircle size={12} />}
                   {isOverdue ? `Sudah jatuh tempo ${Math.abs(days)} hari lalu`
                     : isDueSoon ? `Jatuh tempo ${days} hari lagi — ${formatDate(debt.due_date)}`
-                      : `Jatuh tempo: ${formatDate(debt.due_date)}`}
+                    : `Jatuh tempo: ${formatDate(debt.due_date)}`}
                 </div>
 
                 {debt.status === "active" && (
@@ -154,6 +165,7 @@ export default function DebtsPage() {
         </div>
       )}
 
+      <DebtFormModal open={showForm} onClose={() => { setShowForm(false); load(); }} />
       <DebtPaymentModal debt={payDebt} open={!!payDebt} onClose={() => { setPayDebt(null); load(); }} />
       <ConfirmDialog open={!!deleteId} title="Hapus Utang?" description="Data utang ini akan dihapus permanen."
         confirmLabel="Hapus" confirmVariant="danger"

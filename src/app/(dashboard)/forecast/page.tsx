@@ -146,10 +146,11 @@ export default function ForecastPage() {
               <button
                 key={s}
                 onClick={() => setScenario(s)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${scenario === s
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                  scenario === s
                     ? "bg-text-primary text-background"
                     : "border border-border text-text-secondary hover:text-text-primary"
-                  }`}
+                }`}
               >
                 {s === "best" ? "Skenario Terbaik" : s === "normal" ? "Skenario Normal" : "Skenario Terburuk"}
               </button>
