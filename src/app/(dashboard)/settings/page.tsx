@@ -310,8 +310,8 @@ function PushNotificationCard() {
             {subscribed
               ? "Aktif — kamu akan menerima notifikasi langsung di HP"
               : status === "denied"
-              ? "Izin ditolak. Aktifkan manual dari pengaturan browser/HP."
-              : "Terima notifikasi jatuh tempo & reminder langsung di HP"}
+                ? "Izin ditolak. Aktifkan manual dari pengaturan browser/HP."
+                : "Terima notifikasi jatuh tempo & reminder langsung di HP"}
           </p>
         </div>
       </div>
@@ -333,19 +333,27 @@ function PushNotificationCard() {
     </div>
   );
 }
-
 function ToggleRow({ label, desc, defaultOn }: { label: string; desc: string; defaultOn: boolean }) {
   const [on, setOn] = useState(defaultOn);
   return (
     <div className="flex items-center justify-between p-4 bg-surface rounded-lg border border-border">
-      <div>
+      <div className="flex-1 pr-4">
         <p className="text-sm text-text-primary font-medium">{label}</p>
         <p className="text-xs text-text-secondary mt-0.5">{desc}</p>
       </div>
-      <button onClick={() => setOn(!on)}
-        className={cn("relative rounded-full transition-colors shrink-0", on ? "bg-success" : "bg-surface-card border border-border")}
-        style={{ height: "22px", width: "40px" }}>
-        <span className={cn("absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform", on ? "translate-x-5" : "translate-x-0.5")} />
+      <button
+        onClick={() => setOn(!on)}
+        className={cn(
+          "relative shrink-0 inline-flex items-center rounded-full transition-colors duration-200 h-6 w-11 px-0.5",
+          on ? "bg-success" : "bg-border"
+        )}
+      >
+        <span
+          className={cn(
+            "inline-block h-5 w-5 rounded-full bg-white shadow-md transition-transform duration-200",
+            on ? "translate-x-5" : "translate-x-0"
+          )}
+        />
       </button>
     </div>
   );
