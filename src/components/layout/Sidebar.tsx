@@ -13,6 +13,8 @@ import {
   Settings,
   LogOut,
   ChevronRight,
+  Handshake,
+  CalendarRange,
 } from "lucide-react";
 import { cn, getInitials } from "@/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -21,7 +23,9 @@ import { useEffect, useState } from "react";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/transactions", label: "Transaksi", icon: ArrowLeftRight },
+  { href: "/budget", label: "Budget", icon: CalendarRange },
   { href: "/debts", label: "Utang", icon: CreditCard },
+  { href: "/receivables", label: "Piutang", icon: Handshake },
   { href: "/goals", label: "Target", icon: Target },
   { href: "/wishlist", label: "Wishlist", icon: Sparkles },
   { href: "/forecast", label: "Forecast", icon: TrendingUp },

@@ -282,3 +282,110 @@ export async function getMonthlyChartData() {
   }
   return months;
 }
+
+// ─── Receivables (Piutang) ────────────────────────────────────────────────────
+export async function getReceivables() {
+  const { supabase, userId } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("receivables")
+    .select("*")
+    .eq("user_id", userId)
+    .order("due_date", { ascending: true });
+  if (error) throw error;
+  return data;
+}
+
+export async function addReceivable(recv: {
+  name: string; borrower: string; total_amount: number;
+  start_date: string; due_date: string; priority: string; notes?: string;
+}) {
+  const { supabase, userId } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("receivables")
+    .insert({ ...recv, user_id: userId, total_received: 0, status: "active" })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function recordReceivablePayment(receivableId: string, amount: number, notes?: string) {
+  const { supabase } = await getSupabaseUser();
+  // Get current data
+  const { data: recv, error: fetchErr } = await supabase
+    .from("receivables")
+    .select("*")
+    .eq("id", receivableId)
+    .single();
+  if (fetchErr) throw fetchErr;
+
+  const newReceived = Number(recv.total_received) + amount;
+  const newRemaining = Math.max(0, Number(recv.total_amount) - newReceived);
+  const newStatus = newRemaining === 0 ? "completed" : recv.status;
+
+  const { data, error } = await supabase
+    .from("receivables")
+    .update({ total_received: newReceived, status: newStatus, updated_at: new Date().toISOString() })
+    .eq("id", receivableId)
+    .select()
+    .single();
+  if (error) throw error;
+
+  // Log payment
+  await supabase.from("receivable_payments").insert({
+    receivable_id: receivableId,
+    amount,
+    date: new Date().toISOString().split("T")[0],
+    notes,
+  });
+
+  return data;
+}
+
+export async function deleteReceivable(id: string) {
+  const { supabase } = await getSupabaseUser();
+  const { error } = await supabase.from("receivables").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ─── Budgets ──────────────────────────────────────────────────────────────────
+export async function getBudgets() {
+  const { supabase, userId } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("budgets")
+    .select("*, categories:budget_categories(*)")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+export async function addBudget(budget: {
+  name: string; period: string; year: number; month?: number; week?: number;
+  total_income: number; notes?: string;
+  categories: { name: string; planned_amount: number; color?: string }[];
+}) {
+  const { supabase, userId } = await getSupabaseUser();
+  const { categories, ...budgetData } = budget;
+  const total_planned = categories.reduce((s, c) => s + c.planned_amount, 0);
+
+  const { data: bud, error } = await supabase
+    .from("budgets")
+    .insert({ ...budgetData, user_id: userId, total_planned, total_actual: 0 })
+    .select()
+    .single();
+  if (error) throw error;
+
+  if (categories.length > 0) {
+    await supabase.from("budget_categories").insert(
+      categories.map((c) => ({ ...c, budget_id: bud.id, actual_amount: 0 }))
+    );
+  }
+  return bud;
+}
+
+export async function deleteBudget(id: string) {
+  const { supabase } = await getSupabaseUser();
+  const { error } = await supabase.from("budgets").delete().eq("id", id);
+  if (error) throw error;
+}

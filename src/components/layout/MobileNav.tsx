@@ -6,16 +6,19 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, ArrowLeftRight, CreditCard, MoreHorizontal,
   Target, Sparkles, TrendingUp, BarChart3, Settings, X,
+  Handshake, CalendarRange,
 } from "lucide-react";
 import { cn } from "@/utils";
 
 const mainNav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/transactions", label: "Transaksi", icon: ArrowLeftRight },
-  { href: "/debts", label: "Utang", icon: CreditCard },
+  { href: "/budget", label: "Budget", icon: CalendarRange },
 ];
 
 const moreNav = [
+  { href: "/debts", label: "Utang", icon: CreditCard },
+  { href: "/receivables", label: "Piutang", icon: Handshake },
   { href: "/goals", label: "Target", icon: Target },
   { href: "/wishlist", label: "Wishlist", icon: Sparkles },
   { href: "/forecast", label: "Forecast", icon: TrendingUp },

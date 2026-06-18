@@ -193,6 +193,65 @@ export interface CategoryChartData {
   color: string;
 }
 
+// ─── Receivable (Piutang) ─────────────────────────────────────────────────────
+export type ReceivableStatus = "active" | "completed" | "overdue";
+export type ReceivablePriority = "low" | "medium" | "high";
+
+export interface Receivable {
+  id: string;
+  user_id: string;
+  name: string;         // nama catatan/deskripsi
+  borrower: string;     // nama peminjam
+  total_amount: number;
+  total_received: number;
+  remaining: number;
+  start_date: string;
+  due_date: string;
+  priority: ReceivablePriority;
+  status: ReceivableStatus;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReceivablePayment {
+  id: string;
+  receivable_id: string;
+  amount: number;
+  date: string;
+  notes?: string;
+  created_at: string;
+}
+
+// ─── Budget & Planning ────────────────────────────────────────────────────────
+export type BudgetPeriod = "monthly" | "weekly";
+
+export interface BudgetCategory {
+  id: string;
+  budget_id: string;
+  name: string;
+  planned_amount: number;
+  actual_amount: number;
+  color?: string;
+}
+
+export interface Budget {
+  id: string;
+  user_id: string;
+  name: string;
+  period: BudgetPeriod;
+  year: number;
+  month?: number;   // 1-12, untuk monthly
+  week?: number;    // 1-53, untuk weekly
+  total_income: number;
+  total_planned: number;
+  total_actual: number;
+  categories: BudgetCategory[];
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // ─── Filters ──────────────────────────────────────────────────────────────────
 export interface TransactionFilters {
   type?: TransactionType;

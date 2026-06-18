@@ -8,6 +8,8 @@ import type {
   MonthlyChartData,
   CategoryChartData,
   Notification,
+  Receivable,
+  Budget,
 } from "@/types";
 
 // ─── Dashboard Stats ──────────────────────────────────────────────────────────
@@ -438,3 +440,106 @@ export const mockUser = {
   full_name: "Mu'taz",
   avatar_url: null,
 };
+
+// ─── Receivables (Piutang) ────────────────────────────────────────────────────
+export const mockReceivables: Receivable[] = [
+  {
+    id: "recv-1",
+    user_id: "user-1",
+    name: "Pinjaman Beli HP",
+    borrower: "Dika",
+    total_amount: 2000000,
+    total_received: 500000,
+    remaining: 1500000,
+    start_date: "2025-05-01",
+    due_date: "2025-09-01",
+    priority: "high",
+    status: "active",
+    notes: "Bayar cicilan tiap bulan",
+    created_at: "2025-05-01T00:00:00Z",
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: "recv-2",
+    user_id: "user-1",
+    name: "Patungan tiket konser",
+    borrower: "Bagas",
+    total_amount: 750000,
+    total_received: 0,
+    remaining: 750000,
+    start_date: "2025-07-01",
+    due_date: "2025-08-01",
+    priority: "medium",
+    status: "active",
+    notes: "Konser Maliq D'essentials",
+    created_at: "2025-07-01T00:00:00Z",
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: "recv-3",
+    user_id: "user-1",
+    name: "Talang makan siang",
+    borrower: "Reza",
+    total_amount: 120000,
+    total_received: 120000,
+    remaining: 0,
+    start_date: "2025-06-15",
+    due_date: "2025-06-30",
+    priority: "low",
+    status: "completed",
+    created_at: "2025-06-15T00:00:00Z",
+    updated_at: new Date().toISOString(),
+  },
+];
+
+// ─── Budgets ──────────────────────────────────────────────────────────────────
+const thisMonth = new Date().getMonth() + 1;
+const thisYear = new Date().getFullYear();
+
+export const mockBudgets: Budget[] = [
+  {
+    id: "budget-1",
+    user_id: "user-1",
+    name: `Budget Bulanan ${new Date().toLocaleString("id-ID", { month: "long" })} ${thisYear}`,
+    period: "monthly",
+    year: thisYear,
+    month: thisMonth,
+    total_income: 12450000,
+    total_planned: 9800000,
+    total_actual: 7634000,
+    categories: [
+      { id: "bc-1", budget_id: "budget-1", name: "Makan & Minum", planned_amount: 1500000, actual_amount: 1284200, color: "#64748B" },
+      { id: "bc-2", budget_id: "budget-1", name: "Transport", planned_amount: 700000, actual_amount: 650000, color: "#475569" },
+      { id: "bc-3", budget_id: "budget-1", name: "Kost / Sewa", planned_amount: 3200000, actual_amount: 3200000, color: "#334155" },
+      { id: "bc-4", budget_id: "budget-1", name: "Bayar Utang", planned_amount: 1500000, actual_amount: 875000, color: "#94A3B8" },
+      { id: "bc-5", budget_id: "budget-1", name: "Tabungan", planned_amount: 1500000, actual_amount: 1500000, color: "#22C55E" },
+      { id: "bc-6", budget_id: "budget-1", name: "Belanja", planned_amount: 800000, actual_amount: 1249000, color: "#F59E0B" },
+      { id: "bc-7", budget_id: "budget-1", name: "Langganan", planned_amount: 300000, actual_amount: 250000, color: "#8B5CF6" },
+      { id: "bc-8", budget_id: "budget-1", name: "Lainnya", planned_amount: 300000, actual_amount: 625800, color: "#EC4899" },
+    ],
+    notes: "Budget bulan ini fokus kurangi belanja impulsif",
+    created_at: new Date(thisYear, thisMonth - 1, 1).toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: "budget-2",
+    user_id: "user-1",
+    name: `Budget Minggu Ini`,
+    period: "weekly",
+    year: thisYear,
+    week: Math.ceil(new Date().getDate() / 7),
+    total_income: 3112500,
+    total_planned: 2450000,
+    total_actual: 1908550,
+    categories: [
+      { id: "bc-w1", budget_id: "budget-2", name: "Makan Harian", planned_amount: 700000, actual_amount: 321050, color: "#64748B" },
+      { id: "bc-w2", budget_id: "budget-2", name: "Transport", planned_amount: 175000, actual_amount: 162500, color: "#475569" },
+      { id: "bc-w3", budget_id: "budget-2", name: "Belanja", planned_amount: 200000, actual_amount: 312250, color: "#F59E0B" },
+      { id: "bc-w4", budget_id: "budget-2", name: "Hiburan", planned_amount: 150000, actual_amount: 84200, color: "#8B5CF6" },
+      { id: "bc-w5", budget_id: "budget-2", name: "Tabungan Minggu", planned_amount: 1000000, actual_amount: 1000000, color: "#22C55E" },
+      { id: "bc-w6", budget_id: "budget-2", name: "Lainnya", planned_amount: 225000, actual_amount: 28550, color: "#94A3B8" },
+    ],
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+];
