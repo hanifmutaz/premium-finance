@@ -78,13 +78,85 @@ export async function addTransaction(tx: Omit<Transaction, "id" | "user_id" | "c
       date: tx.date,
     });
   }
+
+  // Sync to active budget if this is an expense with a matching category
+  if (tx.type === "expense" && data.category?.name) {
+    await syncBudgetActual(userId, data.category.name, tx.amount, tx.date);
+  }
+
   return data as Transaction;
 }
 
+// ─── Budget sync helper ─────────────────────────────────────────────────────
+// Finds the active budget covering the transaction date, matches the category
+// by name (case-insensitive), and bumps actual_amount + total_actual.
+async function syncBudgetActual(userId: string, categoryName: string, amount: number, txDate: string) {
+  const supabase = createClient();
+  const date = new Date(txDate);
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const dayOfMonth = date.getDate();
+  const week = Math.ceil(dayOfMonth / 7);
+
+  // Find budgets covering this date: monthly budgets for this year+month,
+  // or weekly budgets for this year+month+week.
+  const { data: budgets } = await supabase
+    .from("budgets")
+    .select("id, period, year, month, week")
+    .eq("user_id", userId)
+    .eq("year", year)
+    .or(`and(period.eq.monthly,month.eq.${month}),and(period.eq.weekly,month.eq.${month},week.eq.${week})`);
+
+  if (!budgets || budgets.length === 0) return;
+
+  for (const budget of budgets) {
+    const { data: cats } = await supabase
+      .from("budget_categories")
+      .select("id, name, actual_amount")
+      .eq("budget_id", budget.id)
+      .ilike("name", categoryName);
+
+    if (!cats || cats.length === 0) continue;
+
+    const cat = cats[0];
+    const newActual = Number(cat.actual_amount) + amount;
+
+    await supabase
+      .from("budget_categories")
+      .update({ actual_amount: newActual })
+      .eq("id", cat.id);
+
+    // Recalculate budget total_actual from all its categories
+    const { data: allCats } = await supabase
+      .from("budget_categories")
+      .select("actual_amount")
+      .eq("budget_id", budget.id);
+
+    const totalActual = (allCats ?? []).reduce((s, c) => s + Number(c.actual_amount), 0);
+
+    await supabase
+      .from("budgets")
+      .update({ total_actual: totalActual })
+      .eq("id", budget.id);
+  }
+}
+
 export async function deleteTransaction(id: string) {
-  const { supabase } = await getSupabaseUser();
+  const { supabase, userId } = await getSupabaseUser();
+
+  // Get transaction details before deleting, to reverse budget sync if needed
+  const { data: tx } = await supabase
+    .from("transactions")
+    .select("*, category:categories(*)")
+    .eq("id", id)
+    .single();
+
   const { error } = await supabase.from("transactions").delete().eq("id", id);
   if (error) throw error;
+
+  if (tx && tx.type === "expense" && tx.category?.name) {
+    await syncBudgetActual(userId, tx.category.name, -Number(tx.amount), tx.date);
+  }
 }
 
 // ─── Debts ────────────────────────────────────────────────────────────────────
@@ -310,7 +382,7 @@ export async function addReceivable(recv: {
 }
 
 export async function recordReceivablePayment(receivableId: string, amount: number, notes?: string) {
-  const { supabase } = await getSupabaseUser();
+  const { supabase, userId } = await getSupabaseUser();
   // Get current data
   const { data: recv, error: fetchErr } = await supabase
     .from("receivables")
@@ -331,12 +403,26 @@ export async function recordReceivablePayment(receivableId: string, amount: numb
     .single();
   if (error) throw error;
 
+  const today = new Date().toISOString().split("T")[0];
+
   // Log payment
   await supabase.from("receivable_payments").insert({
     receivable_id: receivableId,
     amount,
-    date: new Date().toISOString().split("T")[0],
+    date: today,
     notes,
+  });
+
+  // Auto-create income transaction so dashboard/reports reflect this cash inflow
+  await supabase.from("transactions").insert({
+    user_id: userId,
+    type: "income",
+    name: `Piutang Diterima: ${recv.name}`,
+    description: notes || `Pembayaran piutang dari ${recv.borrower}`,
+    amount,
+    date: today,
+    payment_method: "transfer",
+    status: "completed",
   });
 
   return data;
