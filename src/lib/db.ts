@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { Transaction, Debt, Goal, Wishlist } from "@/types";
+import type { Transaction, Debt, Goal, Wishlist, Receivable } from "@/types";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 async function getSupabaseUser() {
