@@ -2,7 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
-import { Plus, CreditCard, CheckCircle2, AlertCircle, Trash2 } from "lucide-react";
+import { Plus, CreditCard, CheckCircle2, AlertCircle, Trash2, Pencil } from "lucide-react";
 import { formatCurrency, formatDate, calculateProgress, daysUntil, cn } from "@/utils";
 import { StatusBadge, PriorityBadge } from "@/components/shared/Badges";
 import { ProgressBar } from "@/components/shared/ProgressBar";
@@ -21,6 +21,7 @@ export default function DebtsPage() {
   const [payDebt, setPayDebt] = useState<Debt | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editData, setEditData] = useState<Debt | null>(null);
 
   async function load() {
     setLoading(true);
@@ -42,6 +43,22 @@ export default function DebtsPage() {
     catch { toast.error("Gagal menghapus"); }
   }
 
+  function openAdd() {
+    setEditData(null);
+    setShowForm(true);
+  }
+
+  function openEdit(debt: Debt) {
+    setEditData(debt);
+    setShowForm(true);
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setEditData(null);
+    load();
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -49,7 +66,7 @@ export default function DebtsPage() {
           <h1 className="text-lg font-semibold text-text-primary">Manajemen Utang</h1>
           <p className="text-sm text-text-secondary mt-0.5">{active.length} utang aktif</p>
         </div>
-        <button onClick={() => setShowForm(true)}
+        <button onClick={openAdd}
           className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold hover:bg-text-primary/90 transition-colors">
           <Plus size={13} /> Tambah Utang
         </button>
@@ -87,7 +104,7 @@ export default function DebtsPage() {
         <EmptyState icon={CreditCard} title="Belum ada utang"
           description={tab === "active" ? "Tambah utang pertama kamu." : "Belum ada utang yang lunas."}
           action={tab === "active" ? (
-            <button onClick={() => setShowForm(true)}
+            <button onClick={openAdd}
               className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold">
               <Plus size={13} /> Tambah Utang
             </button>
@@ -117,6 +134,10 @@ export default function DebtsPage() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <PriorityBadge priority={debt.priority} />
+                    <button onClick={() => openEdit(debt)}
+                      className="opacity-0 group-hover:opacity-100 text-accent hover:text-text-primary transition-all">
+                      <Pencil size={14} />
+                    </button>
                     <button onClick={() => setDeleteId(debt.id)}
                       className="opacity-0 group-hover:opacity-100 text-accent hover:text-danger transition-all">
                       <Trash2 size={14} />
@@ -150,7 +171,7 @@ export default function DebtsPage() {
                   {(isOverdue || isDueSoon) && <AlertCircle size={12} />}
                   {isOverdue ? `Sudah jatuh tempo ${Math.abs(days)} hari lalu`
                     : isDueSoon ? `Jatuh tempo ${days} hari lagi — ${formatDate(debt.due_date)}`
-                    : `Jatuh tempo: ${formatDate(debt.due_date)}`}
+                      : `Jatuh tempo: ${formatDate(debt.due_date)}`}
                 </div>
 
                 {debt.status === "active" && (
@@ -165,7 +186,7 @@ export default function DebtsPage() {
         </div>
       )}
 
-      <DebtFormModal open={showForm} onClose={() => { setShowForm(false); load(); }} />
+      <DebtFormModal open={showForm} onClose={closeForm} editData={editData} />
       <DebtPaymentModal debt={payDebt} open={!!payDebt} onClose={() => { setPayDebt(null); load(); }} />
       <ConfirmDialog open={!!deleteId} title="Hapus Utang?" description="Data utang ini akan dihapus permanen."
         confirmLabel="Hapus" confirmVariant="danger"

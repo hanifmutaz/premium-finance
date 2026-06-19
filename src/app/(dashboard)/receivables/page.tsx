@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
 import {
-  Plus, Handshake, CheckCircle2, AlertCircle, Trash2,
+  Plus, Handshake, CheckCircle2, AlertCircle, Trash2, Pencil,
   DollarSign, Clock, TrendingUp,
 } from "lucide-react";
 import { formatCurrency, formatDate, calculateProgress, daysUntil, cn } from "@/utils";
@@ -24,6 +24,7 @@ export default function ReceivablesPage() {
   const [collectId, setCollectId] = useState<Receivable | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editData, setEditData] = useState<Receivable | null>(null);
 
   async function load() {
     setLoading(true);
@@ -58,8 +59,19 @@ export default function ReceivablesPage() {
     }
   }
 
-  function handleAdded() {
+  function openAdd() {
+    setEditData(null);
+    setShowForm(true);
+  }
+
+  function openEdit(recv: Receivable) {
+    setEditData(recv);
+    setShowForm(true);
+  }
+
+  function closeForm() {
     setShowForm(false);
+    setEditData(null);
     load();
   }
 
@@ -85,7 +97,7 @@ export default function ReceivablesPage() {
           </p>
         </div>
         <button
-          onClick={() => setShowForm(true)}
+          onClick={openAdd}
           className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold hover:bg-text-primary/90 transition-colors"
         >
           <Plus size={13} /> Catat Piutang
@@ -140,7 +152,7 @@ export default function ReceivablesPage() {
           title={tab === "active" ? "Belum ada piutang aktif" : "Belum ada piutang yang lunas"}
           description={tab === "active" ? "Catat uang yang lo pinjemin ke orang lain di sini" : undefined}
           action={tab === "active" ? (
-            <button onClick={() => setShowForm(true)}
+            <button onClick={openAdd}
               className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold">
               <Plus size={13} /> Catat Piutang
             </button>
@@ -212,6 +224,12 @@ export default function ReceivablesPage() {
                       </button>
                     )}
                     <button
+                      onClick={() => openEdit(recv)}
+                      className="p-1.5 text-accent hover:text-text-primary transition-colors rounded"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
                       onClick={() => setDeleteId(recv.id)}
                       className="p-1.5 text-accent hover:text-danger transition-colors rounded"
                     >
@@ -227,7 +245,7 @@ export default function ReceivablesPage() {
 
       {/* Modals */}
       {showForm && (
-        <ReceivableFormModal onClose={() => setShowForm(false)} onAdded={handleAdded} />
+        <ReceivableFormModal onClose={closeForm} onAdded={closeForm} editData={editData} />
       )}
       {collectId && (
         <ReceivablePaymentModal

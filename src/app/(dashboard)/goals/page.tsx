@@ -2,7 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
-import { Plus, Target, CheckCircle2, TrendingUp, AlertTriangle, Trash2 } from "lucide-react";
+import { Plus, Target, CheckCircle2, TrendingUp, AlertTriangle, Trash2, Pencil } from "lucide-react";
 import { formatCurrency, formatDate, calculateProgress, cn } from "@/utils";
 import { calcGoalProgress } from "@/lib/calculations";
 import { PriorityBadge } from "@/components/shared/Badges";
@@ -19,6 +19,7 @@ export default function GoalsPage() {
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editData, setEditData] = useState<Goal | null>(null);
 
   async function load() {
     setLoading(true);
@@ -40,6 +41,22 @@ export default function GoalsPage() {
     catch { toast.error("Gagal menghapus"); }
   }
 
+  function openAdd() {
+    setEditData(null);
+    setShowForm(true);
+  }
+
+  function openEdit(goal: Goal) {
+    setEditData(goal);
+    setShowForm(true);
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setEditData(null);
+    load();
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -47,7 +64,7 @@ export default function GoalsPage() {
           <h1 className="text-lg font-semibold text-text-primary">Target Pelunasan</h1>
           <p className="text-sm text-text-secondary mt-0.5">{active.length} target aktif</p>
         </div>
-        <button onClick={() => setShowForm(true)}
+        <button onClick={openAdd}
           className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold hover:bg-text-primary/90 transition-colors">
           <Plus size={13} /> Tambah Target
         </button>
@@ -73,7 +90,7 @@ export default function GoalsPage() {
       ) : goals.length === 0 ? (
         <EmptyState icon={Target} title="Belum ada target" description="Tambah target keuangan pertama kamu."
           action={
-            <button onClick={() => setShowForm(true)}
+            <button onClick={openAdd}
               className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold">
               <Plus size={13} /> Tambah Target
             </button>
@@ -100,6 +117,10 @@ export default function GoalsPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <PriorityBadge priority={goal.priority} />
+                    <button onClick={() => openEdit(goal)}
+                      className="opacity-0 group-hover:opacity-100 text-accent hover:text-text-primary transition-all">
+                      <Pencil size={14} />
+                    </button>
                     <button onClick={() => setDeleteId(goal.id)}
                       className="opacity-0 group-hover:opacity-100 text-accent hover:text-danger transition-all">
                       <Trash2 size={14} />
@@ -153,7 +174,7 @@ export default function GoalsPage() {
         </div>
       )}
 
-      <GoalFormModal open={showForm} onClose={() => { setShowForm(false); load(); }} />
+      <GoalFormModal open={showForm} onClose={closeForm} editData={editData} />
       <ConfirmDialog open={!!deleteId} title="Hapus Target?" description="Target ini akan dihapus permanen."
         confirmLabel="Hapus" confirmVariant="danger"
         onConfirm={() => deleteId && handleDelete(deleteId)} onClose={() => setDeleteId(null)} />

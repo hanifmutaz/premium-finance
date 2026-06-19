@@ -4,8 +4,8 @@ import { useState, useEffect } from "react";
 import { X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/utils";
-import { addTransaction, getCategories } from "@/lib/db";
-import type { TransactionType, PaymentMethod } from "@/types";
+import { addTransaction, updateTransaction, getCategories } from "@/lib/db";
+import type { Transaction, TransactionType, PaymentMethod } from "@/types";
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "transfer", label: "Transfer Bank" },
@@ -16,23 +16,50 @@ const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "other", label: "Lainnya" },
 ];
 
-interface Props { open: boolean; onClose: () => void; }
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  editData?: Transaction | null;
+}
 
-export function TransactionFormModal({ open, onClose }: Props) {
-  const [loading, setLoading] = useState(false);
-  const [type, setType] = useState<TransactionType>("expense");
-  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
-  const [form, setForm] = useState({
+function emptyForm() {
+  return {
     name: "", description: "", category_id: "", amount: "",
     date: new Date().toISOString().split("T")[0],
     payment_method: "transfer" as PaymentMethod,
-  });
+  };
+}
+
+export function TransactionFormModal({ open, onClose, editData }: Props) {
+  const isEdit = !!editData;
+  const [loading, setLoading] = useState(false);
+  const [type, setType] = useState<TransactionType>("expense");
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [form, setForm] = useState(emptyForm());
+
+  useEffect(() => {
+    if (!open) return;
+    if (editData) {
+      setType(editData.type);
+      setForm({
+        name: editData.name,
+        description: editData.description ?? "",
+        category_id: editData.category_id ?? "",
+        amount: String(editData.amount),
+        date: editData.date,
+        payment_method: editData.payment_method,
+      });
+    } else {
+      setType("expense");
+      setForm(emptyForm());
+    }
+  }, [open, editData]);
 
   useEffect(() => {
     if (open) {
       getCategories(type === "income" ? "income" : "expense")
         .then(setCategories)
-        .catch(() => {});
+        .catch(() => { });
     }
   }, [open, type]);
 
@@ -41,20 +68,33 @@ export function TransactionFormModal({ open, onClose }: Props) {
     if (!form.name || !form.amount) { toast.error("Nama dan nominal wajib diisi"); return; }
     setLoading(true);
     try {
-      await addTransaction({
-        type,
-        name: form.name,
-        description: form.description || undefined,
-        category_id: form.category_id || undefined,
-        amount: parseFloat(form.amount),
-        date: form.date,
-        payment_method: form.payment_method,
-        status: "completed",
-      });
-      toast.success("Transaksi berhasil ditambahkan");
-      setForm({ name: "", description: "", category_id: "", amount: "", date: new Date().toISOString().split("T")[0], payment_method: "transfer" });
+      if (isEdit && editData) {
+        await updateTransaction(editData.id, {
+          type,
+          name: form.name,
+          description: form.description || undefined,
+          category_id: form.category_id || undefined,
+          amount: parseFloat(form.amount),
+          date: form.date,
+          payment_method: form.payment_method,
+        });
+        toast.success("Transaksi berhasil diperbarui");
+      } else {
+        await addTransaction({
+          type,
+          name: form.name,
+          description: form.description || undefined,
+          category_id: form.category_id || undefined,
+          amount: parseFloat(form.amount),
+          date: form.date,
+          payment_method: form.payment_method,
+          status: "completed",
+        });
+        toast.success("Transaksi berhasil ditambahkan");
+      }
+      setForm(emptyForm());
       onClose();
-    } catch { toast.error("Gagal menyimpan transaksi"); }
+    } catch { toast.error(isEdit ? "Gagal memperbarui transaksi" : "Gagal menyimpan transaksi"); }
     finally { setLoading(false); }
   }
 
@@ -65,7 +105,7 @@ export function TransactionFormModal({ open, onClose }: Props) {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full sm:max-w-md bg-surface-card border border-border rounded-t-2xl sm:rounded-xl shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border sticky top-0 bg-surface-card">
-          <h2 className="text-sm font-semibold text-text-primary">Tambah Transaksi</h2>
+          <h2 className="text-sm font-semibold text-text-primary">{isEdit ? "Edit Transaksi" : "Tambah Transaksi"}</h2>
           <button onClick={onClose} className="text-accent hover:text-text-primary transition-colors"><X size={16} /></button>
         </div>
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
@@ -139,7 +179,7 @@ export function TransactionFormModal({ open, onClose }: Props) {
             <button type="submit" disabled={loading}
               className="flex-1 py-2.5 bg-text-primary text-background text-sm font-semibold rounded-md hover:bg-text-primary/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
               {loading && <Loader2 size={14} className="animate-spin" />}
-              {loading ? "Menyimpan..." : "Simpan"}
+              {loading ? "Menyimpan..." : isEdit ? "Simpan Perubahan" : "Simpan"}
             </button>
           </div>
         </form>

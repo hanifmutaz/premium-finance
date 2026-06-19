@@ -1,20 +1,43 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/utils";
-import { addDebt } from "@/lib/db";
+import { addDebt, updateDebt } from "@/lib/db";
+import type { Debt } from "@/types";
 
-interface Props { open: boolean; onClose: () => void; }
+interface Props { open: boolean; onClose: () => void; editData?: Debt | null; }
 
-export function DebtFormModal({ open, onClose }: Props) {
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
+function emptyForm() {
+  return {
     name: "", lender: "", total_amount: "",
     start_date: new Date().toISOString().split("T")[0],
     due_date: "", priority: "medium", notes: "",
-  });
+  };
+}
+
+export function DebtFormModal({ open, onClose, editData }: Props) {
+  const isEdit = !!editData;
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState(emptyForm());
+
+  useEffect(() => {
+    if (!open) return;
+    if (editData) {
+      setForm({
+        name: editData.name,
+        lender: editData.lender,
+        total_amount: String(editData.total_amount),
+        start_date: editData.start_date,
+        due_date: editData.due_date,
+        priority: editData.priority,
+        notes: editData.notes ?? "",
+      });
+    } else {
+      setForm(emptyForm());
+    }
+  }, [open, editData]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -24,7 +47,7 @@ export function DebtFormModal({ open, onClose }: Props) {
     }
     setLoading(true);
     try {
-      await addDebt({
+      const payload = {
         name: form.name,
         lender: form.lender,
         total_amount: parseFloat(form.total_amount),
@@ -32,11 +55,18 @@ export function DebtFormModal({ open, onClose }: Props) {
         due_date: form.due_date,
         priority: form.priority as "low" | "medium" | "high",
         notes: form.notes || undefined,
-      });
-      toast.success("Utang berhasil ditambahkan");
-      setForm({ name: "", lender: "", total_amount: "", start_date: new Date().toISOString().split("T")[0], due_date: "", priority: "medium", notes: "" });
+      };
+
+      if (isEdit && editData) {
+        await updateDebt(editData.id, payload);
+        toast.success("Utang berhasil diperbarui");
+      } else {
+        await addDebt(payload);
+        toast.success("Utang berhasil ditambahkan");
+      }
+      setForm(emptyForm());
       onClose();
-    } catch { toast.error("Gagal menyimpan utang"); }
+    } catch { toast.error(isEdit ? "Gagal memperbarui utang" : "Gagal menyimpan utang"); }
     finally { setLoading(false); }
   }
 
@@ -47,7 +77,7 @@ export function DebtFormModal({ open, onClose }: Props) {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full sm:max-w-md bg-surface-card border border-border rounded-t-2xl sm:rounded-xl shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border sticky top-0 bg-surface-card">
-          <h2 className="text-sm font-semibold text-text-primary">Tambah Utang</h2>
+          <h2 className="text-sm font-semibold text-text-primary">{isEdit ? "Edit Utang" : "Tambah Utang"}</h2>
           <button onClick={onClose} className="text-accent hover:text-text-primary transition-colors"><X size={16} /></button>
         </div>
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
@@ -71,6 +101,11 @@ export function DebtFormModal({ open, onClose }: Props) {
                 placeholder="0"
                 className="w-full bg-input border border-border rounded-md pl-9 pr-3 py-2.5 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent transition-colors tabular-nums" />
             </div>
+            {isEdit && (
+              <p className="text-[10px] text-warning mt-1">
+                Mengubah total tidak mengubah riwayat pembayaran yang sudah tercatat.
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -109,7 +144,7 @@ export function DebtFormModal({ open, onClose }: Props) {
             <button type="submit" disabled={loading}
               className="flex-1 py-2.5 bg-text-primary text-background text-sm font-semibold rounded-md hover:bg-text-primary/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
               {loading && <Loader2 size={14} className="animate-spin" />}
-              {loading ? "Menyimpan..." : "Simpan"}
+              {loading ? "Menyimpan..." : isEdit ? "Simpan Perubahan" : "Simpan"}
             </button>
           </div>
         </form>

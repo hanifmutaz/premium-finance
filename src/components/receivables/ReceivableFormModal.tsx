@@ -1,28 +1,44 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Loader2 } from "lucide-react";
 import { cn } from "@/utils";
-import { addReceivable } from "@/lib/db";
+import { addReceivable, updateReceivable } from "@/lib/db";
 import { toast } from "sonner";
-import type { ReceivablePriority } from "@/types";
+import type { Receivable, ReceivablePriority } from "@/types";
 
 interface Props {
   onClose: () => void;
   onAdded: () => void;
+  editData?: Receivable | null;
 }
 
-export function ReceivableFormModal({ onClose, onAdded }: Props) {
-  const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
-    name: "",
-    borrower: "",
-    total_amount: "",
+function emptyForm() {
+  return {
+    name: "", borrower: "", total_amount: "",
     start_date: new Date().toISOString().split("T")[0],
-    due_date: "",
-    priority: "medium" as ReceivablePriority,
-    notes: "",
-  });
+    due_date: "", priority: "medium" as ReceivablePriority, notes: "",
+  };
+}
+
+export function ReceivableFormModal({ onClose, onAdded, editData }: Props) {
+  const isEdit = !!editData;
+  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState(emptyForm());
+
+  useEffect(() => {
+    if (editData) {
+      setForm({
+        name: editData.name,
+        borrower: editData.borrower,
+        total_amount: String(editData.total_amount),
+        start_date: editData.start_date,
+        due_date: editData.due_date,
+        priority: editData.priority,
+        notes: editData.notes ?? "",
+      });
+    }
+  }, [editData]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -38,7 +54,7 @@ export function ReceivableFormModal({ onClose, onAdded }: Props) {
 
     setLoading(true);
     try {
-      await addReceivable({
+      const payload = {
         name: form.name,
         borrower: form.borrower,
         total_amount: amount,
@@ -46,130 +62,96 @@ export function ReceivableFormModal({ onClose, onAdded }: Props) {
         due_date: form.due_date,
         priority: form.priority,
         notes: form.notes || undefined,
-      });
-      toast.success("Piutang berhasil dicatat!");
+      };
+
+      if (isEdit && editData) {
+        await updateReceivable(editData.id, payload);
+        toast.success("Piutang berhasil diperbarui!");
+      } else {
+        await addReceivable(payload);
+        toast.success("Piutang berhasil dicatat!");
+      }
       onAdded();
     } catch {
-      toast.error("Gagal menyimpan piutang");
+      toast.error(isEdit ? "Gagal memperbarui piutang" : "Gagal menyimpan piutang");
     } finally {
       setLoading(false);
     }
   }
 
-  const inputClass = "w-full bg-surface border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-text-secondary transition-colors";
-  const labelClass = "block text-xs font-medium text-text-secondary mb-1.5";
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-surface-card border border-border rounded-xl shadow-2xl animate-fade-in">
-        <div className="flex items-center justify-between p-5 border-b border-border">
-          <div>
-            <h2 className="text-sm font-semibold text-text-primary">Catat Piutang Baru</h2>
-            <p className="text-xs text-text-secondary mt-0.5">Uang yang lo pinjemin ke orang lain</p>
-          </div>
-          <button onClick={onClose} className="text-accent hover:text-text-primary transition-colors">
-            <X size={16} />
-          </button>
+      <div className="relative w-full sm:max-w-md bg-surface-card border border-border rounded-t-2xl sm:rounded-xl shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border sticky top-0 bg-surface-card">
+          <h2 className="text-sm font-semibold text-text-primary">{isEdit ? "Edit Piutang" : "Catat Piutang Baru"}</h2>
+          <button onClick={onClose} className="text-accent hover:text-text-primary transition-colors"><X size={16} /></button>
         </div>
-
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div>
+            <label className="block text-xs text-text-secondary mb-1.5">Nama Piutang *</label>
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="mis. Pinjaman ke Budi"
+              className="w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent transition-colors" />
+          </div>
+          <div>
+            <label className="block text-xs text-text-secondary mb-1.5">Peminjam *</label>
+            <input value={form.borrower} onChange={(e) => setForm({ ...form, borrower: e.target.value })}
+              placeholder="mis. Budi Santoso"
+              className="w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent transition-colors" />
+          </div>
+          <div>
+            <label className="block text-xs text-text-secondary mb-1.5">Total Dipinjamkan *</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-accent text-sm">Rp</span>
+              <input type="number" value={form.total_amount} onChange={(e) => setForm({ ...form, total_amount: e.target.value })}
+                placeholder="0"
+                className="w-full bg-input border border-border rounded-md pl-9 pr-3 py-2.5 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent transition-colors tabular-nums" />
+            </div>
+            {isEdit && (
+              <p className="text-[10px] text-warning mt-1">
+                Mengubah total tidak mengubah riwayat penerimaan yang sudah tercatat.
+              </p>
+            )}
+          </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <label className={labelClass}>Deskripsi / Nama Piutang</label>
-              <input
-                className={inputClass}
-                placeholder="cth: Pinjaman beli laptop"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-              />
-            </div>
-            <div className="col-span-2">
-              <label className={labelClass}>Nama Peminjam</label>
-              <input
-                className={inputClass}
-                placeholder="cth: Budi, Andi, dll"
-                value={form.borrower}
-                onChange={(e) => setForm({ ...form, borrower: e.target.value })}
-                required
-              />
-            </div>
-            <div className="col-span-2">
-              <label className={labelClass}>Jumlah (Rp)</label>
-              <input
-                className={inputClass}
-                placeholder="cth: 500000"
-                value={form.total_amount}
-                onChange={(e) => setForm({ ...form, total_amount: e.target.value })}
-                type="number"
-                min="1"
-                required
-              />
+            <div>
+              <label className="block text-xs text-text-secondary mb-1.5">Tanggal Pinjam</label>
+              <input type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+                className="w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors" />
             </div>
             <div>
-              <label className={labelClass}>Tanggal Pinjam</label>
-              <input
-                className={inputClass}
-                type="date"
-                value={form.start_date}
-                onChange={(e) => setForm({ ...form, start_date: e.target.value })}
-                required
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Jatuh Tempo</label>
-              <input
-                className={inputClass}
-                type="date"
-                value={form.due_date}
-                onChange={(e) => setForm({ ...form, due_date: e.target.value })}
-                required
-              />
-            </div>
-            <div className="col-span-2">
-              <label className={labelClass}>Prioritas</label>
-              <div className="flex gap-2">
-                {(["low", "medium", "high"] as ReceivablePriority[]).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setForm({ ...form, priority: p })}
-                    className={cn(
-                      "flex-1 py-1.5 rounded text-xs font-medium transition-colors border",
-                      form.priority === p
-                        ? p === "high" ? "bg-danger/20 border-danger text-danger"
-                          : p === "medium" ? "bg-warning/20 border-warning text-warning"
-                            : "bg-surface border-border text-text-secondary"
-                        : "border-border text-text-secondary hover:border-accent"
-                    )}
-                  >
-                    {p === "high" ? "Tinggi" : p === "medium" ? "Sedang" : "Rendah"}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="col-span-2">
-              <label className={labelClass}>Catatan (opsional)</label>
-              <textarea
-                className={cn(inputClass, "resize-none")}
-                rows={2}
-                placeholder="cth: Bayar balik pas gajian"
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              />
+              <label className="block text-xs text-text-secondary mb-1.5">Jatuh Tempo *</label>
+              <input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })}
+                className="w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors" />
             </div>
           </div>
-
+          <div>
+            <label className="block text-xs text-text-secondary mb-1.5">Prioritas</label>
+            <div className="grid grid-cols-3 gap-1.5 p-1 bg-surface rounded-lg">
+              {[{ v: "low", l: "Rendah" }, { v: "medium", l: "Sedang" }, { v: "high", l: "Tinggi" }].map(({ v, l }) => (
+                <button key={v} type="button" onClick={() => setForm({ ...form, priority: v as ReceivablePriority })}
+                  className={cn("py-1.5 rounded-md text-xs font-medium transition-colors",
+                    form.priority === v ? "bg-text-primary text-background" : "text-text-secondary hover:text-text-primary"
+                  )}>{l}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-text-secondary mb-1.5">Catatan (opsional)</label>
+            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              placeholder="Catatan tambahan..." rows={2}
+              className="w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent transition-colors resize-none" />
+          </div>
           <div className="flex gap-2 pt-1">
             <button type="button" onClick={onClose}
-              className="flex-1 py-2 rounded-md border border-border text-sm text-text-secondary hover:text-text-primary hover:border-accent transition-colors">
+              className="flex-1 py-2.5 border border-border text-text-secondary text-sm font-medium rounded-md hover:border-accent hover:text-text-primary transition-colors">
               Batal
             </button>
             <button type="submit" disabled={loading}
               className="flex-1 py-2 rounded-md bg-text-primary text-background text-sm font-semibold hover:bg-text-primary/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
               {loading && <Loader2 size={14} className="animate-spin" />}
-              {loading ? "Menyimpan..." : "Simpan Piutang"}
+              {loading ? "Menyimpan..." : isEdit ? "Simpan Perubahan" : "Simpan Piutang"}
             </button>
           </div>
         </form>

@@ -2,7 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useMemo, useEffect } from "react";
-import { Plus, Search, ArrowUpRight, ArrowDownLeft, CreditCard, ArrowLeftRight, Trash2 } from "lucide-react";
+import { Plus, Search, ArrowUpRight, ArrowDownLeft, CreditCard, ArrowLeftRight, Trash2, Pencil } from "lucide-react";
 import { formatCurrency, formatDate, cn } from "@/utils";
 import { StatusBadge } from "@/components/shared/Badges";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -32,6 +32,7 @@ export default function TransactionsPage() {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<TransactionType | "all">("all");
   const [showForm, setShowForm] = useState(false);
+  const [editData, setEditData] = useState<Transaction | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   async function load() {
@@ -61,6 +62,22 @@ export default function TransactionsPage() {
     catch { toast.error("Gagal menghapus"); }
   }
 
+  function openAdd() {
+    setEditData(null);
+    setShowForm(true);
+  }
+
+  function openEdit(tx: Transaction) {
+    setEditData(tx);
+    setShowForm(true);
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setEditData(null);
+    load();
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -68,7 +85,7 @@ export default function TransactionsPage() {
           <h1 className="text-lg font-semibold text-text-primary">Transaksi</h1>
           <p className="text-sm text-text-secondary mt-0.5">{filtered.length} transaksi</p>
         </div>
-        <button onClick={() => setShowForm(true)}
+        <button onClick={openAdd}
           className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold hover:bg-text-primary/90 transition-colors">
           <Plus size={13} /> Tambah Transaksi
         </button>
@@ -109,7 +126,7 @@ export default function TransactionsPage() {
         ) : filtered.length === 0 ? (
           <EmptyState icon={ArrowLeftRight} title="Belum ada transaksi" description="Tambah transaksi pertama kamu."
             action={
-              <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold">
+              <button onClick={openAdd} className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold">
                 <Plus size={13} /> Tambah Transaksi
               </button>
             }
@@ -123,7 +140,7 @@ export default function TransactionsPage() {
                   <div className="w-8 h-8 rounded-lg bg-surface flex items-center justify-center shrink-0 border border-border">
                     {typeIcon[tx.type] ?? typeIcon.transfer}
                   </div>
-                  <div className="flex-1 min-w-0">
+                  <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEdit(tx)}>
                     <p className="text-sm font-medium text-text-primary truncate">{tx.name}</p>
                     <p className="text-xs text-text-secondary">{tx.category?.name ?? "—"} · {formatDate(tx.date)}</p>
                   </div>
@@ -131,10 +148,14 @@ export default function TransactionsPage() {
                   <span className={cn("text-sm font-semibold tabular-nums", isIncome ? "text-success" : "text-text-primary")}>
                     {isIncome ? "+" : "-"}{formatCurrency(tx.amount)}
                   </span>
-                  <button onClick={() => setDeleteId(tx.id)}
-                    className="opacity-0 group-hover:opacity-100 text-accent hover:text-danger transition-all ml-1">
-                    <Trash2 size={14} />
-                  </button>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                    <button onClick={() => openEdit(tx)} className="p-1 text-accent hover:text-text-primary transition-colors">
+                      <Pencil size={14} />
+                    </button>
+                    <button onClick={() => setDeleteId(tx.id)} className="p-1 text-accent hover:text-danger transition-colors">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -142,7 +163,7 @@ export default function TransactionsPage() {
         )}
       </div>
 
-      <TransactionFormModal open={showForm} onClose={() => { setShowForm(false); load(); }} />
+      <TransactionFormModal open={showForm} onClose={closeForm} editData={editData} />
       <ConfirmDialog open={!!deleteId} title="Hapus Transaksi?" description="Transaksi ini akan dihapus permanen dan tidak bisa dikembalikan."
         confirmLabel="Hapus" confirmVariant="danger"
         onConfirm={() => deleteId && handleDelete(deleteId)} onClose={() => setDeleteId(null)} />

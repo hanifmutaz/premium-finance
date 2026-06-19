@@ -2,7 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
-import { Plus, ShoppingBag, CheckCircle2, Clock, Sparkles, Trash2 } from "lucide-react";
+import { Plus, ShoppingBag, CheckCircle2, Clock, Sparkles, Trash2, Pencil } from "lucide-react";
 import { formatCurrency, cn } from "@/utils";
 import { calcWishlistProgress } from "@/lib/calculations";
 import { ProgressBar } from "@/components/shared/ProgressBar";
@@ -21,6 +21,7 @@ export default function WishlistPage() {
   const [loading, setLoading] = useState(true);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editData, setEditData] = useState<Wishlist | null>(null);
 
   async function load() {
     setLoading(true);
@@ -39,6 +40,22 @@ export default function WishlistPage() {
     catch { toast.error("Gagal menghapus"); }
   }
 
+  function openAdd() {
+    setEditData(null);
+    setShowForm(true);
+  }
+
+  function openEdit(item: Wishlist) {
+    setEditData(item);
+    setShowForm(true);
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setEditData(null);
+    load();
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -46,7 +63,7 @@ export default function WishlistPage() {
           <h1 className="text-lg font-semibold text-text-primary">Wishlist</h1>
           <p className="text-sm text-text-secondary mt-0.5">{pending.length} item dalam daftar</p>
         </div>
-        <button onClick={() => setShowForm(true)}
+        <button onClick={openAdd}
           className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold hover:bg-text-primary/90 transition-colors">
           <Plus size={13} /> Tambah Item
         </button>
@@ -67,7 +84,7 @@ export default function WishlistPage() {
       ) : items.length === 0 ? (
         <EmptyState icon={ShoppingBag} title="Wishlist kosong" description="Tambah item yang ingin kamu beli."
           action={
-            <button onClick={() => setShowForm(true)}
+            <button onClick={openAdd}
               className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold">
               <Plus size={13} /> Tambah Item
             </button>
@@ -80,7 +97,7 @@ export default function WishlistPage() {
               <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">Dalam Daftar ({pending.length})</h2>
               <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                 {pending.map((item) => (
-                  <WishlistCard key={item.id} item={item} onDelete={() => setDeleteId(item.id)} />
+                  <WishlistCard key={item.id} item={item} onEdit={() => openEdit(item)} onDelete={() => setDeleteId(item.id)} />
                 ))}
               </div>
             </div>
@@ -90,7 +107,7 @@ export default function WishlistPage() {
               <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">Sudah Dibeli ({purchased.length})</h2>
               <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                 {purchased.map((item) => (
-                  <WishlistCard key={item.id} item={item} onDelete={() => setDeleteId(item.id)} />
+                  <WishlistCard key={item.id} item={item} onEdit={() => openEdit(item)} onDelete={() => setDeleteId(item.id)} />
                 ))}
               </div>
             </div>
@@ -98,7 +115,7 @@ export default function WishlistPage() {
         </>
       )}
 
-      <WishlistFormModal open={showForm} onClose={() => { setShowForm(false); load(); }} />
+      <WishlistFormModal open={showForm} onClose={closeForm} editData={editData} />
       <ConfirmDialog open={!!deleteId} title="Hapus Item?" description="Item wishlist ini akan dihapus permanen."
         confirmLabel="Hapus" confirmVariant="danger"
         onConfirm={() => deleteId && handleDelete(deleteId)} onClose={() => setDeleteId(null)} />
@@ -106,7 +123,7 @@ export default function WishlistPage() {
   );
 }
 
-function WishlistCard({ item, onDelete }: { item: Wishlist; onDelete: () => void }) {
+function WishlistCard({ item, onEdit, onDelete }: { item: Wishlist; onEdit: () => void; onDelete: () => void }) {
   const { remaining, percentage, monthsNeeded, canBuy, recommendation } = calcWishlistProgress(item, MONTHLY_SURPLUS);
   const isPurchased = item.status === "purchased";
 
@@ -125,6 +142,10 @@ function WishlistCard({ item, onDelete }: { item: Wishlist; onDelete: () => void
         </div>
         <div className="flex items-center gap-2">
           <PriorityBadge priority={item.priority} />
+          <button onClick={onEdit}
+            className="opacity-0 group-hover:opacity-100 text-accent hover:text-text-primary transition-all">
+            <Pencil size={14} />
+          </button>
           <button onClick={onDelete}
             className="opacity-0 group-hover:opacity-100 text-accent hover:text-danger transition-all">
             <Trash2 size={14} />

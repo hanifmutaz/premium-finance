@@ -159,6 +159,38 @@ export async function deleteTransaction(id: string) {
   }
 }
 
+export async function updateTransaction(
+  id: string,
+  tx: Partial<Omit<Transaction, "id" | "user_id" | "created_at" | "updated_at" | "category">>
+) {
+  const { supabase, userId } = await getSupabaseUser();
+
+  // Get original transaction to reverse old budget sync if amount/category/date changes
+  const { data: original } = await supabase
+    .from("transactions")
+    .select("*, category:categories(*)")
+    .eq("id", id)
+    .single();
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .update({ ...tx, category_id: tx.category_id || null, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select("*, category:categories(*)")
+    .single();
+  if (error) throw error;
+
+  // Reverse old sync, then apply new sync (only relevant for expense type)
+  if (original && original.type === "expense" && original.category?.name) {
+    await syncBudgetActual(userId, original.category.name, -Number(original.amount), original.date);
+  }
+  if (data.type === "expense" && data.category?.name) {
+    await syncBudgetActual(userId, data.category.name, Number(data.amount), data.date);
+  }
+
+  return data as Transaction;
+}
+
 // ─── Debts ────────────────────────────────────────────────────────────────────
 export async function getDebts() {
   const { supabase, userId } = await getSupabaseUser();
@@ -189,6 +221,21 @@ export async function deleteDebt(id: string) {
   const { supabase } = await getSupabaseUser();
   const { error } = await supabase.from("debts").delete().eq("id", id);
   if (error) throw error;
+}
+
+export async function updateDebt(id: string, debt: {
+  name: string; lender: string; total_amount: number;
+  start_date: string; due_date: string; priority: string; notes?: string;
+}) {
+  const { supabase } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("debts")
+    .update({ ...debt, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Debt;
 }
 
 // ─── Goals ────────────────────────────────────────────────────────────────────
@@ -222,6 +269,21 @@ export async function updateGoalAmount(id: string, amount: number) {
   const { data, error } = await supabase
     .from("goals")
     .update({ current_amount: amount })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Goal;
+}
+
+export async function updateGoal(id: string, goal: {
+  name: string; target_amount: number; deadline: string;
+  priority: string; notes?: string;
+}) {
+  const { supabase } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("goals")
+    .update({ ...goal, updated_at: new Date().toISOString() })
     .eq("id", id)
     .select()
     .single();
@@ -266,6 +328,21 @@ export async function updateWishlistSaving(id: string, saved_amount: number) {
   const { data, error } = await supabase
     .from("wishlists")
     .update({ saved_amount })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Wishlist;
+}
+
+export async function updateWishlistItem(id: string, item: {
+  name: string; category: string; price: number;
+  priority: string; target_date?: string; notes?: string;
+}) {
+  const { supabase } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("wishlists")
+    .update({ ...item, updated_at: new Date().toISOString() })
     .eq("id", id)
     .select()
     .single();
@@ -434,6 +511,21 @@ export async function deleteReceivable(id: string) {
   if (error) throw error;
 }
 
+export async function updateReceivable(id: string, recv: {
+  name: string; borrower: string; total_amount: number;
+  start_date: string; due_date: string; priority: string; notes?: string;
+}) {
+  const { supabase } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("receivables")
+    .update({ ...recv, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Receivable;
+}
+
 // ─── Budgets ──────────────────────────────────────────────────────────────────
 export async function getBudgets() {
   const { supabase, userId } = await getSupabaseUser();
@@ -474,4 +566,37 @@ export async function deleteBudget(id: string) {
   const { supabase } = await getSupabaseUser();
   const { error } = await supabase.from("budgets").delete().eq("id", id);
   if (error) throw error;
+}
+
+export async function updateBudget(id: string, budget: {
+  name: string; total_income: number; notes?: string;
+  categories: { id?: string; name: string; planned_amount: number; actual_amount?: number; color?: string }[];
+}) {
+  const { supabase } = await getSupabaseUser();
+  const { categories, ...budgetData } = budget;
+  const total_planned = categories.reduce((s, c) => s + c.planned_amount, 0);
+  const total_actual = categories.reduce((s, c) => s + (c.actual_amount ?? 0), 0);
+
+  const { data: bud, error } = await supabase
+    .from("budgets")
+    .update({ ...budgetData, total_planned, total_actual, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+
+  // Replace all categories: delete old, insert new (simplest way to keep things in sync)
+  await supabase.from("budget_categories").delete().eq("budget_id", id);
+  if (categories.length > 0) {
+    await supabase.from("budget_categories").insert(
+      categories.map((c) => ({
+        name: c.name,
+        planned_amount: c.planned_amount,
+        actual_amount: c.actual_amount ?? 0,
+        color: c.color,
+        budget_id: id,
+      }))
+    );
+  }
+  return bud;
 }

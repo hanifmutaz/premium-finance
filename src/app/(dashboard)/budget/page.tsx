@@ -22,6 +22,7 @@ export default function BudgetPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [editData, setEditData] = useState<Budget | null>(null);
 
   async function load() {
     setLoading(true);
@@ -40,8 +41,19 @@ export default function BudgetPage() {
 
   const filtered = budgets.filter((b) => b.period === tab);
 
-  function handleAdded() {
+  function openAdd() {
+    setEditData(null);
+    setShowForm(true);
+  }
+
+  function openEdit(budget: Budget) {
+    setEditData(budget);
+    setShowForm(true);
+  }
+
+  function closeForm() {
     setShowForm(false);
+    setEditData(null);
     load();
   }
 
@@ -67,7 +79,7 @@ export default function BudgetPage() {
           </p>
         </div>
         <button
-          onClick={() => setShowForm(true)}
+          onClick={openAdd}
           className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold hover:bg-text-primary/90 transition-colors"
         >
           <Plus size={13} /> Buat Budget
@@ -105,7 +117,7 @@ export default function BudgetPage() {
           title={`Belum ada budget ${tab === "monthly" ? "bulanan" : "mingguan"}`}
           description="Buat budget untuk mulai tracking pengeluaran vs rencana"
           action={
-            <button onClick={() => setShowForm(true)}
+            <button onClick={openAdd}
               className="flex items-center gap-1.5 px-3 py-2 bg-text-primary text-background rounded-md text-xs font-semibold">
               <Plus size={13} /> Buat Budget
             </button>
@@ -152,6 +164,12 @@ export default function BudgetPage() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openEdit(budget); }}
+                        className="p-1.5 text-accent hover:text-text-primary transition-colors rounded"
+                      >
+                        <Pencil size={13} />
+                      </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); setDeleteId(budget.id); }}
                         className="p-1.5 text-accent hover:text-danger transition-colors rounded"
@@ -260,8 +278,9 @@ export default function BudgetPage() {
       {showForm && (
         <BudgetFormModal
           defaultPeriod={tab}
-          onClose={() => setShowForm(false)}
-          onAdded={handleAdded}
+          onClose={closeForm}
+          onAdded={closeForm}
+          editData={editData}
         />
       )}
       <ConfirmDialog

@@ -1,21 +1,40 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/utils";
-import { addWishlistItem } from "@/lib/db";
+import { addWishlistItem, updateWishlistItem } from "@/lib/db";
+import type { Wishlist } from "@/types";
 
 const CATEGORIES = ["Elektronik", "Fashion", "Kendaraan", "Properti", "Pendidikan", "Kesehatan", "Hiburan", "Lainnya"];
 
-interface Props { open: boolean; onClose: () => void; }
+interface Props { open: boolean; onClose: () => void; editData?: Wishlist | null; }
 
-export function WishlistFormModal({ open, onClose }: Props) {
+function emptyForm() {
+  return { name: "", category: "Elektronik", price: "", priority: "medium", target_date: "", notes: "" };
+}
+
+export function WishlistFormModal({ open, onClose, editData }: Props) {
+  const isEdit = !!editData;
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState({
-    name: "", category: "Elektronik", price: "",
-    priority: "medium", target_date: "", notes: "",
-  });
+  const [form, setForm] = useState(emptyForm());
+
+  useEffect(() => {
+    if (!open) return;
+    if (editData) {
+      setForm({
+        name: editData.name,
+        category: editData.category,
+        price: String(editData.price),
+        priority: editData.priority,
+        target_date: editData.target_date ?? "",
+        notes: editData.notes ?? "",
+      });
+    } else {
+      setForm(emptyForm());
+    }
+  }, [open, editData]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -25,18 +44,25 @@ export function WishlistFormModal({ open, onClose }: Props) {
     }
     setLoading(true);
     try {
-      await addWishlistItem({
+      const payload = {
         name: form.name,
         category: form.category,
         price: parseFloat(form.price),
         priority: form.priority as "low" | "medium" | "high",
         target_date: form.target_date || undefined,
         notes: form.notes || undefined,
-      });
-      toast.success("Item wishlist berhasil ditambahkan");
-      setForm({ name: "", category: "Elektronik", price: "", priority: "medium", target_date: "", notes: "" });
+      };
+
+      if (isEdit && editData) {
+        await updateWishlistItem(editData.id, payload);
+        toast.success("Item wishlist berhasil diperbarui");
+      } else {
+        await addWishlistItem(payload);
+        toast.success("Item wishlist berhasil ditambahkan");
+      }
+      setForm(emptyForm());
       onClose();
-    } catch { toast.error("Gagal menyimpan wishlist"); }
+    } catch { toast.error(isEdit ? "Gagal memperbarui wishlist" : "Gagal menyimpan wishlist"); }
     finally { setLoading(false); }
   }
 
@@ -47,7 +73,7 @@ export function WishlistFormModal({ open, onClose }: Props) {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full sm:max-w-md bg-surface-card border border-border rounded-t-2xl sm:rounded-xl shadow-2xl animate-fade-in max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border sticky top-0 bg-surface-card">
-          <h2 className="text-sm font-semibold text-text-primary">Tambah Wishlist</h2>
+          <h2 className="text-sm font-semibold text-text-primary">{isEdit ? "Edit Wishlist" : "Tambah Wishlist"}</h2>
           <button onClick={onClose} className="text-accent hover:text-text-primary transition-colors"><X size={16} /></button>
         </div>
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
@@ -105,7 +131,7 @@ export function WishlistFormModal({ open, onClose }: Props) {
             <button type="submit" disabled={loading}
               className="flex-1 py-2.5 bg-text-primary text-background text-sm font-semibold rounded-md hover:bg-text-primary/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
               {loading && <Loader2 size={14} className="animate-spin" />}
-              {loading ? "Menyimpan..." : "Simpan"}
+              {loading ? "Menyimpan..." : isEdit ? "Simpan Perubahan" : "Simpan"}
             </button>
           </div>
         </form>
