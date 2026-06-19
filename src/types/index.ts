@@ -60,6 +60,12 @@ export interface Debt {
   priority: DebtPriority;
   status: DebtStatus;
   notes?: string;
+  // ── Installment fields (nullable for non-installment debts) ──
+  is_installment?: boolean;
+  installment_amount?: number | null;
+  tenor_months?: number | null;
+  installments_paid?: number | null;
+  next_due_date?: string | null;
   created_at: string;
   updated_at: string;
 }
