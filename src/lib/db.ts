@@ -898,3 +898,25 @@ export async function markAllNotificationsRead() {
     .eq("is_read", false);
   if (error) throw error;
 }
+
+// Live-listen utk row baru di tabel `notifications` (butuh realtime
+// di-enable di Supabase: `alter publication supabase_realtime add table public.notifications;`).
+// Return fungsi untuk unsubscribe — wajib dipanggil di cleanup useEffect.
+export async function subscribeToNotifications(
+  onInsert: (notif: Notification) => void
+): Promise<() => void> {
+  const { supabase, userId } = await getSupabaseUser();
+
+  const channel = supabase
+    .channel(`notifications:${userId}`)
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${userId}` },
+      (payload) => onInsert(payload.new as Notification)
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}

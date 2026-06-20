@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { Search, Bell } from "lucide-react";
+import { toast } from "sonner";
 import { NotificationPanel } from "@/components/shared/NotificationPanel";
-import { getNotifications, markNotificationRead, markAllNotificationsRead } from "@/lib/db";
+import { getNotifications, markNotificationRead, markAllNotificationsRead, subscribeToNotifications } from "@/lib/db";
 import type { Notification } from "@/types";
 
 const pageTitles: Record<string, string> = {
@@ -36,6 +37,33 @@ export function Header() {
       }
     }
     loadNotifs();
+  }, []);
+
+  // Live update: notif baru (misal dari cron check-due-reminders) langsung
+  // muncul tanpa perlu refresh halaman.
+  useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+
+    subscribeToNotifications((notif) => {
+      setNotifications((prev) => {
+        if (prev.some((n) => n.id === notif.id)) return prev; // hindari dobel
+        return [notif, ...prev];
+      });
+      toast(notif.title, { description: notif.message });
+    })
+      .then((unsub) => {
+        if (cancelled) unsub();
+        else unsubscribe = unsub;
+      })
+      .catch(() => {
+        // belum login — gak masalah, gak ada yang perlu di-subscribe
+      });
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, []);
 
   const unread = notifications.filter((n) => !n.is_read).length;
