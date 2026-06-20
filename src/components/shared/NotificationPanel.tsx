@@ -17,9 +17,11 @@ const iconMap = {
 interface Props {
   notifications: Notification[];
   onClose: () => void;
+  onMarkRead: (id: string) => void;
+  onMarkAllRead: () => void;
 }
 
-export function NotificationPanel({ notifications, onClose }: Props) {
+export function NotificationPanel({ notifications, onClose, onMarkRead, onMarkAllRead }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -59,6 +61,7 @@ export function NotificationPanel({ notifications, onClose }: Props) {
             return (
               <div
                 key={notif.id}
+                onClick={() => !notif.is_read && onMarkRead(notif.id)}
                 className={cn(
                   "px-4 py-3 flex gap-3 hover:bg-surface/50 transition-colors cursor-pointer",
                   !notif.is_read && "bg-surface/30"
@@ -67,11 +70,11 @@ export function NotificationPanel({ notifications, onClose }: Props) {
                 <div className={cn(
                   "mt-0.5 shrink-0 w-7 h-7 rounded-md flex items-center justify-center",
                   notif.type === "debt_due" ? "bg-danger/10" :
-                  notif.type === "goal_reminder" ? "bg-success/10" : "bg-accent/10"
+                    notif.type === "goal_reminder" ? "bg-success/10" : "bg-accent/10"
                 )}>
                   <Icon size={13} className={cn(
                     notif.type === "debt_due" ? "text-danger" :
-                    notif.type === "goal_reminder" ? "text-success" : "text-accent"
+                      notif.type === "goal_reminder" ? "text-success" : "text-accent"
                   )} />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -91,7 +94,7 @@ export function NotificationPanel({ notifications, onClose }: Props) {
       </div>
 
       <div className="px-4 py-2.5 border-t border-border">
-        <button className="text-xs text-accent hover:text-text-primary transition-colors w-full text-center">
+        <button onClick={onMarkAllRead} className="text-xs text-accent hover:text-text-primary transition-colors w-full text-center">
           Tandai semua sebagai dibaca
         </button>
       </div>

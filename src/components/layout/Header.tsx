@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { Search, Bell } from "lucide-react";
 import { NotificationPanel } from "@/components/shared/NotificationPanel";
-import { createClient } from "@/lib/supabase/client";
+import { getNotifications, markNotificationRead, markAllNotificationsRead } from "@/lib/db";
 import type { Notification } from "@/types";
 
 const pageTitles: Record<string, string> = {
@@ -28,21 +28,35 @@ export function Header() {
 
   useEffect(() => {
     async function loadNotifs() {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return;
-      const { data } = await supabase
-        .from("notifications")
-        .select("*")
-        .eq("user_id", session.user.id)
-        .order("created_at", { ascending: false })
-        .limit(10);
-      if (data) setNotifications(data as Notification[]);
+      try {
+        const data = await getNotifications();
+        setNotifications(data);
+      } catch {
+        // belum login / session expired — biarin kosong, jangan crash header
+      }
     }
     loadNotifs();
   }, []);
 
   const unread = notifications.filter((n) => !n.is_read).length;
+
+  async function handleMarkRead(id: string) {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+    try {
+      await markNotificationRead(id);
+    } catch {
+      // gagal sync ke server, biarin state lokal tetap kebaca
+    }
+  }
+
+  async function handleMarkAllRead() {
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    try {
+      await markAllNotificationsRead();
+    } catch {
+      // gagal sync ke server, biarin state lokal tetap kebaca
+    }
+  }
 
   return (
     <header className="h-14 glass flex items-center gap-3 px-4 md:px-6 shrink-0 sticky top-0 z-30">
@@ -70,7 +84,12 @@ export function Header() {
           {unread > 0 && <span className="absolute top-1 right-1 w-2 h-2 bg-danger rounded-full" />}
         </button>
         {showNotif && (
-          <NotificationPanel notifications={notifications} onClose={() => setShowNotif(false)} />
+          <NotificationPanel
+            notifications={notifications}
+            onClose={() => setShowNotif(false)}
+            onMarkRead={handleMarkRead}
+            onMarkAllRead={handleMarkAllRead}
+          />
         )}
       </div>
     </header>

@@ -22,21 +22,30 @@ Deno.serve(async (_req) => {
   in7days.setDate(in7days.getDate() + 7);
 
   // ── 1. Find debts due within 7 days ──────────────────────────────────────
+  // Catatan: untuk cicilan (is_installment), tanggal jatuh tempo yang relevan
+  // adalah next_due_date, bukan due_date (yang itu tanggal jatuh tempo akhir).
   const { data: debts, error: debtsError } = await supabase
     .from("debts")
-    .select("id, user_id, name, due_date, remaining")
-    .eq("status", "active")
-    .lte("due_date", in7days.toISOString().split("T")[0])
-    .gte("due_date", today.toISOString().split("T")[0]);
+    .select("id, user_id, name, due_date, next_due_date, is_installment, remaining")
+    .eq("status", "active");
 
   if (debtsError) {
     return new Response(JSON.stringify({ error: debtsError.message }), { status: 500 });
   }
 
+  const dueSoonDebts = (debts ?? []).filter((debt) => {
+    const dueStr = debt.is_installment && debt.next_due_date ? debt.next_due_date : debt.due_date;
+    if (!dueStr) return false;
+    const due = new Date(dueStr);
+    return due >= today && due <= in7days;
+  });
+
   let notificationsSent = 0;
   const errors: string[] = [];
 
-  for (const debt of debts ?? []) {
+  for (const debt of dueSoonDebts) {
+    const dueStr = debt.is_installment && debt.next_due_date ? debt.next_due_date : debt.due_date;
+
     // Check if notification already sent today for this debt
     const { data: existing } = await supabase
       .from("notifications")
@@ -49,7 +58,7 @@ Deno.serve(async (_req) => {
     if (existing && existing.length > 0) continue; // already notified today
 
     const daysLeft = Math.ceil(
-      (new Date(debt.due_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+      (new Date(dueStr).getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
     );
 
     const title = "Jatuh Tempo Utang";
@@ -99,7 +108,7 @@ Deno.serve(async (_req) => {
   return new Response(
     JSON.stringify({
       success: true,
-      debtsChecked: debts?.length ?? 0,
+      debtsChecked: dueSoonDebts.length,
       notificationsSent,
       errors,
     }),
