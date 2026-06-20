@@ -144,7 +144,7 @@ async function syncBudgetActual(userId: string, categoryName: string, amount: nu
 export async function deleteTransaction(id: string) {
   const { supabase, userId } = await getSupabaseUser();
 
-  // Get transaction details before deleting, to reverse budget sync if needed
+  // Get transaction details before deleting, to reverse budget/debt sync if needed
   const { data: tx } = await supabase
     .from("transactions")
     .select("*, category:categories(*)")
@@ -156,6 +156,13 @@ export async function deleteTransaction(id: string) {
 
   if (tx && tx.type === "expense" && tx.category?.name) {
     await syncBudgetActual(userId, tx.category.name, -Number(tx.amount), tx.date);
+  }
+
+  // If this was a debt payment, remove the linked debt_payments row too.
+  // The sync_debt_payment trigger will automatically recalculate the debt's
+  // total_paid, installments_paid, and next_due_date after this delete.
+  if (tx && tx.type === "debt_payment" && tx.debt_id) {
+    await supabase.from("debt_payments").delete().eq("transaction_id", id);
   }
 }
 
@@ -206,10 +213,7 @@ export async function getDebts() {
 export async function addDebt(debt: {
   name: string; lender: string; total_amount: number;
   start_date: string; due_date: string; priority: string; notes?: string;
-  // Installment fields
-  is_installment?: boolean;
-  installment_amount?: number | null;
-  tenor_months?: number | null;
+  is_installment?: boolean; installment_amount?: number; tenor_months?: number;
 }) {
   const { supabase, userId } = await getSupabaseUser();
   const { data, error } = await supabase
@@ -219,9 +223,9 @@ export async function addDebt(debt: {
       user_id: userId,
       total_paid: 0,
       status: "active",
-      // For installments, seed installments_paid = 0 and next_due_date = due_date
-      installments_paid: debt.is_installment ? 0 : null,
-      next_due_date: debt.is_installment ? debt.due_date : null,
+      is_installment: debt.is_installment ?? false,
+      installments_paid: 0,
+      next_due_date: debt.due_date,
     })
     .select()
     .single();
@@ -238,25 +242,12 @@ export async function deleteDebt(id: string) {
 export async function updateDebt(id: string, debt: {
   name: string; lender: string; total_amount: number;
   start_date: string; due_date: string; priority: string; notes?: string;
-  // Installment fields
-  is_installment?: boolean;
-  installment_amount?: number | null;
-  tenor_months?: number | null;
+  is_installment?: boolean; installment_amount?: number; tenor_months?: number;
 }) {
   const { supabase } = await getSupabaseUser();
-
-  // If switching to non-installment, clear installment-specific fields
-  const installmentClear = debt.is_installment === false
-    ? { installments_paid: null, next_due_date: null, installment_amount: null, tenor_months: null }
-    : {};
-
   const { data, error } = await supabase
     .from("debts")
-    .update({
-      ...debt,
-      ...installmentClear,
-      updated_at: new Date().toISOString(),
-    })
+    .update({ ...debt, updated_at: new Date().toISOString() })
     .eq("id", id)
     .select()
     .single();
