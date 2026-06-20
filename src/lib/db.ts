@@ -213,7 +213,7 @@ export async function getDebts() {
 export async function addDebt(debt: {
   name: string; lender: string; total_amount: number;
   start_date: string; due_date: string; priority: string; notes?: string;
-  is_installment?: boolean; installment_amount?: number; tenor_months?: number;
+  is_installment?: boolean; installment_amount?: number | null; tenor_months?: number | null;
 }) {
   const { supabase, userId } = await getSupabaseUser();
   const { data, error } = await supabase
@@ -242,12 +242,18 @@ export async function deleteDebt(id: string) {
 export async function updateDebt(id: string, debt: {
   name: string; lender: string; total_amount: number;
   start_date: string; due_date: string; priority: string; notes?: string;
-  is_installment?: boolean; installment_amount?: number; tenor_months?: number;
+  is_installment?: boolean; installment_amount?: number | null; tenor_months?: number | null;
 }) {
   const { supabase } = await getSupabaseUser();
+
+  // If switching to non-installment, clear installment-specific fields
+  const installmentClear = debt.is_installment === false
+    ? { installments_paid: null, next_due_date: null, installment_amount: null, tenor_months: null }
+    : {};
+
   const { data, error } = await supabase
     .from("debts")
-    .update({ ...debt, updated_at: new Date().toISOString() })
+    .update({ ...debt, ...installmentClear, updated_at: new Date().toISOString() })
     .eq("id", id)
     .select()
     .single();
