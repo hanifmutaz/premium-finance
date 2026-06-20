@@ -6,9 +6,10 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
-import { FileDown, FileSpreadsheet, Download } from "lucide-react";
+import { FileDown, FileSpreadsheet, Download, Loader2 } from "lucide-react";
 import { formatCurrency, cn } from "@/utils";
 import { getTransactions, getMonthlyChartData } from "@/lib/db";
+import { exportToExcel, exportToPDF, exportToCSV } from "@/lib/export";
 import { toast } from "sonner";
 import type { Transaction, MonthlyChartData } from "@/types";
 
@@ -32,24 +33,56 @@ function CustomTooltip({ active, payload, label }: any) {
 
 export default function ReportsPage() {
   const [period, setPeriod] = useState<typeof PERIOD_TABS[number]>("Bulanan");
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
   const [monthlyData, setMonthlyData] = useState<MonthlyChartData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState<"pdf" | "excel" | "csv" | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
         const [txs, monthly] = await Promise.all([
-          getTransactions({ limit: 200 }),
+          getTransactions({ limit: 500 }),
           getMonthlyChartData(),
         ]);
-        setTransactions(txs);
+        setAllTransactions(txs);
         setMonthlyData(monthly);
       } catch { toast.error("Gagal memuat laporan"); }
       finally { setLoading(false); }
     }
     load();
   }, []);
+
+  // Filter transactions based on selected period (Bulanan = current month, Tahunan = current year)
+  const transactions = useMemo(() => {
+    const now = new Date();
+    if (period === "Bulanan") {
+      return allTransactions.filter((tx) => {
+        const d = new Date(tx.date);
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+      });
+    }
+    // Tahunan: current year
+    return allTransactions.filter((tx) => new Date(tx.date).getFullYear() === now.getFullYear());
+  }, [allTransactions, period]);
+
+  // Yearly chart data: aggregate allTransactions by month for current year
+  const yearlyData = useMemo(() => {
+    const now = new Date();
+    const months = Array.from({ length: 12 }, (_, i) => {
+      const monthName = new Date(now.getFullYear(), i, 1).toLocaleString("id-ID", { month: "short" });
+      const monthTxs = allTransactions.filter((tx) => {
+        const d = new Date(tx.date);
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === i;
+      });
+      const income = monthTxs.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
+      const expense = monthTxs.filter((t) => t.type !== "income").reduce((s, t) => s + t.amount, 0);
+      return { month: monthName, income, expense, balance: income - expense };
+    });
+    return months;
+  }, [allTransactions]);
+
+  const chartData = period === "Bulanan" ? monthlyData : yearlyData;
 
   const totals = useMemo(() => {
     const income = transactions.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
@@ -66,22 +99,56 @@ export default function ReportsPage() {
     return Object.entries(map).map(([name, value]) => ({ name, value }));
   }, [transactions]);
 
+  const periodLabel = useMemo(() => {
+    const now = new Date();
+    if (period === "Bulanan") {
+      return now.toLocaleString("id-ID", { month: "long", year: "numeric" });
+    }
+    return `Tahun ${now.getFullYear()}`;
+  }, [period]);
+
+  async function handleExport(type: "pdf" | "excel" | "csv") {
+    if (transactions.length === 0) {
+      toast.error("Tidak ada data untuk diekspor pada periode ini");
+      return;
+    }
+    setExporting(type);
+    try {
+      const meta = { periodLabel, generatedAt: new Date().toLocaleString("id-ID") };
+      if (type === "pdf") {
+        exportToPDF(transactions, totals, meta);
+      } else if (type === "excel") {
+        exportToExcel(transactions, totals, meta);
+      } else {
+        exportToCSV(transactions);
+      }
+      toast.success(`Laporan ${type.toUpperCase()} berhasil diunduh`);
+    } catch {
+      toast.error(`Gagal mengekspor ke ${type.toUpperCase()}`);
+    } finally {
+      setExporting(null);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-text-primary">Laporan Keuangan</h1>
-          <p className="text-sm text-text-secondary mt-0.5">Ringkasan aktivitas finansial</p>
+          <p className="text-sm text-text-secondary mt-0.5">Ringkasan aktivitas finansial — {periodLabel}</p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-md text-xs text-text-secondary hover:text-text-primary hover:border-accent transition-colors">
-            <FileDown size={13} /> PDF
+          <button onClick={() => handleExport("pdf")} disabled={!!exporting}
+            className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-md text-xs text-text-secondary hover:text-text-primary hover:border-accent transition-colors disabled:opacity-50">
+            {exporting === "pdf" ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />} PDF
           </button>
-          <button className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-md text-xs text-text-secondary hover:text-text-primary hover:border-accent transition-colors">
-            <FileSpreadsheet size={13} /> Excel
+          <button onClick={() => handleExport("excel")} disabled={!!exporting}
+            className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-md text-xs text-text-secondary hover:text-text-primary hover:border-accent transition-colors disabled:opacity-50">
+            {exporting === "excel" ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />} Excel
           </button>
-          <button className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-md text-xs text-text-secondary hover:text-text-primary hover:border-accent transition-colors">
-            <Download size={13} /> CSV
+          <button onClick={() => handleExport("csv")} disabled={!!exporting}
+            className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-md text-xs text-text-secondary hover:text-text-primary hover:border-accent transition-colors disabled:opacity-50">
+            {exporting === "csv" ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} CSV
           </button>
         </div>
       </div>
@@ -121,9 +188,9 @@ export default function ReportsPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="card-base p-5">
               <h3 className="text-sm font-semibold text-text-primary mb-1">Income vs Expense</h3>
-              <p className="text-xs text-text-secondary mb-4">6 bulan terakhir</p>
+              <p className="text-xs text-text-secondary mb-4">{period === "Bulanan" ? "6 bulan terakhir" : `Sepanjang tahun ${new Date().getFullYear()}`}</p>
               <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={monthlyData} barCategoryGap="30%">
+                <BarChart data={chartData} barCategoryGap="30%">
                   <CartesianGrid vertical={false} stroke="#334155" strokeDasharray="3 3" />
                   <XAxis dataKey="month" tick={{ fill: "#94A3B8", fontSize: 11 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: "#94A3B8", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v) => formatCurrency(v, true)} width={64} />
@@ -137,7 +204,7 @@ export default function ReportsPage() {
             {categoryData.length > 0 ? (
               <div className="card-base p-5">
                 <h3 className="text-sm font-semibold text-text-primary mb-1">Distribusi Pengeluaran</h3>
-                <p className="text-xs text-text-secondary mb-4">Per kategori</p>
+                <p className="text-xs text-text-secondary mb-4">Per kategori — {periodLabel}</p>
                 <div className="flex items-center gap-4">
                   <ResponsiveContainer width={130} height={130}>
                     <PieChart>
@@ -161,15 +228,16 @@ export default function ReportsPage() {
               </div>
             ) : (
               <div className="card-base p-5 flex items-center justify-center">
-                <p className="text-text-secondary text-sm">Belum ada data pengeluaran</p>
+                <p className="text-text-secondary text-sm">Belum ada data pengeluaran pada periode ini</p>
               </div>
             )}
           </div>
 
-          {transactions.length > 0 && (
+          {transactions.length > 0 ? (
             <div className="card-base">
-              <div className="px-5 py-4 border-b border-border">
+              <div className="px-5 py-4 border-b border-border flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-text-primary">Detail Transaksi</h3>
+                <span className="text-xs text-text-secondary">{transactions.length} transaksi</span>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -181,7 +249,7 @@ export default function ReportsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {transactions.slice(0, 50).map((tx) => (
+                    {transactions.slice(0, 100).map((tx) => (
                       <tr key={tx.id} className="hover:bg-surface/30 transition-colors">
                         <td className="px-5 py-3 text-xs text-text-secondary tabular-nums whitespace-nowrap">{tx.date}</td>
                         <td className="px-5 py-3 text-sm text-text-primary">{tx.name}</td>
@@ -197,6 +265,15 @@ export default function ReportsPage() {
                   </tbody>
                 </table>
               </div>
+              {transactions.length > 100 && (
+                <p className="px-5 py-3 text-xs text-text-secondary border-t border-border">
+                  Menampilkan 100 dari {transactions.length} transaksi. Export ke Excel/PDF untuk data lengkap.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="card-base p-8 flex items-center justify-center">
+              <p className="text-text-secondary text-sm">Belum ada transaksi pada periode ini</p>
             </div>
           )}
         </>
