@@ -52,13 +52,14 @@ export async function subscribeToPush(): Promise<boolean> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.user) throw new Error("Not authenticated");
 
-  await supabase.from("push_subscriptions").upsert({
+  const { error } = await supabase.from("push_subscriptions").upsert({
     user_id: session.user.id,
     endpoint: subJson.endpoint!,
     p256dh: subJson.keys!.p256dh,
     auth: subJson.keys!.auth,
     user_agent: navigator.userAgent,
   }, { onConflict: "endpoint" });
+  if (error) throw error;
 
   return true;
 }
