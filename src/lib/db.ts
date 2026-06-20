@@ -400,32 +400,65 @@ export async function getDashboardStats() {
   const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
   const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split("T")[0];
 
-  const [txRes, debtRes] = await Promise.all([
+  const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevFirstDay = new Date(prevMonth.getFullYear(), prevMonth.getMonth(), 1).toISOString().split("T")[0];
+  const prevLastDay = new Date(prevMonth.getFullYear(), prevMonth.getMonth() + 1, 0).toISOString().split("T")[0];
+
+  const [txRes, prevTxRes, debtRes, recvRes] = await Promise.all([
     supabase.from("transactions").select("type, amount")
       .eq("user_id", userId).gte("date", firstDay).lte("date", lastDay),
+    supabase.from("transactions").select("type, amount")
+      .eq("user_id", userId).gte("date", prevFirstDay).lte("date", prevLastDay),
     supabase.from("debts").select("*").eq("user_id", userId).eq("status", "active"),
+    supabase.from("receivables").select("*").eq("user_id", userId).eq("status", "active"),
   ]);
 
   const transactions = txRes.data ?? [];
+  const prevTransactions = prevTxRes.data ?? [];
   const debts = (debtRes.data ?? []) as Debt[];
+  const receivables = recvRes.data ?? [];
 
   const monthly_income = transactions.filter((t) => t.type === "income")
     .reduce((s, t) => s + Number(t.amount), 0);
   const monthly_expense = transactions.filter((t) => t.type !== "income")
     .reduce((s, t) => s + Number(t.amount), 0);
+
+  const prev_monthly_income = prevTransactions.filter((t) => t.type === "income")
+    .reduce((s, t) => s + Number(t.amount), 0);
+  const prev_monthly_expense = prevTransactions.filter((t) => t.type !== "income")
+    .reduce((s, t) => s + Number(t.amount), 0);
+
+  // Real percentage change vs last month (null if no prior data to compare against)
+  const income_trend = prev_monthly_income > 0
+    ? Math.round(((monthly_income - prev_monthly_income) / prev_monthly_income) * 1000) / 10
+    : null;
+  const expense_trend = prev_monthly_expense > 0
+    ? Math.round(((monthly_expense - prev_monthly_expense) / prev_monthly_expense) * 1000) / 10
+    : null;
+
   const total_active_debt = debts.reduce((s, d) => s + Number(d.remaining), 0);
   const total_debt_amount = debts.reduce((s, d) => s + Number(d.total_amount), 0);
   const total_debt_paid = debts.reduce((s, d) => s + Number(d.total_paid), 0);
-  const nearest_due = [...debts].sort(
-    (a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime()
-  )[0] ?? null;
+
+  // Total piutang aktif (uang yang masih harus diterima dari orang lain)
+  const total_active_receivable = receivables.reduce((s, r) => s + Number(r.remaining), 0);
+
+  // Nearest due: untuk cicilan pakai next_due_date, untuk utang biasa pakai due_date
+  const nearest_due = [...debts].sort((a, b) => {
+    const dateA = a.is_installment && a.next_due_date ? a.next_due_date : a.due_date;
+    const dateB = b.is_installment && b.next_due_date ? b.next_due_date : b.due_date;
+    return new Date(dateA).getTime() - new Date(dateB).getTime();
+  })[0] ?? null;
 
   return {
     monthly_income,
     monthly_expense,
     monthly_remaining: monthly_income - monthly_expense,
     current_balance: monthly_income - monthly_expense,
+    income_trend,
+    expense_trend,
     total_active_debt,
+    total_active_receivable,
     debt_paid_percentage: total_debt_amount > 0
       ? Math.round((total_debt_paid / total_debt_amount) * 100) : 0,
     health_score: null,
@@ -453,6 +486,156 @@ export async function getMonthlyChartData() {
     months.push({ month: monthName, income, expense, balance: income - expense });
   }
   return months;
+}
+
+// ─── Recurring Transactions ───────────────────────────────────────────────────
+export async function getRecurringTransactions() {
+  const { supabase, userId } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("recurring_transactions")
+    .select("*, category:categories(*)")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+export async function addRecurringTransaction(rec: {
+  name: string; type: "income" | "expense"; amount: number;
+  category_id?: string; payment_method: string; frequency: "monthly" | "weekly";
+  day_of_period: number; start_date: string; end_date?: string; notes?: string;
+}) {
+  const { supabase, userId } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("recurring_transactions")
+    .insert({ ...rec, user_id: userId, is_active: true })
+    .select("*, category:categories(*)")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateRecurringTransaction(id: string, rec: {
+  name: string; type: "income" | "expense"; amount: number;
+  category_id?: string; payment_method: string; frequency: "monthly" | "weekly";
+  day_of_period: number; start_date: string; end_date?: string; notes?: string;
+}) {
+  const { supabase } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("recurring_transactions")
+    .update({ ...rec, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select("*, category:categories(*)")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function toggleRecurringActive(id: string, isActive: boolean) {
+  const { supabase } = await getSupabaseUser();
+  const { error } = await supabase
+    .from("recurring_transactions")
+    .update({ is_active: isActive, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteRecurringTransaction(id: string) {
+  const { supabase } = await getSupabaseUser();
+  const { error } = await supabase.from("recurring_transactions").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ─── Forecast defaults from real transaction history ─────────────────────────
+// Averages income/expense over the last 3 months so the forecast page can
+// start from numbers that reflect actual spending habits, instead of
+// hardcoded placeholder values.
+export async function getForecastDefaults() {
+  const { supabase, userId } = await getSupabaseUser();
+
+  const now = new Date();
+  const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString().split("T")[0];
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split("T")[0];
+
+  const { data: txs } = await supabase
+    .from("transactions")
+    .select("type, amount, date")
+    .eq("user_id", userId)
+    .gte("date", threeMonthsAgo)
+    .lte("date", lastDay);
+
+  const transactions = txs ?? [];
+
+  // Group by year-month to average across however many months have data
+  const monthKeys = new Set(transactions.map((t) => t.date.slice(0, 7)));
+  const monthCount = Math.max(1, monthKeys.size);
+
+  const totalIncome = transactions.filter((t) => t.type === "income").reduce((s, t) => s + Number(t.amount), 0);
+  const totalExpense = transactions.filter((t) => t.type === "expense").reduce((s, t) => s + Number(t.amount), 0);
+  const totalDebtPayment = transactions.filter((t) => t.type === "debt_payment").reduce((s, t) => s + Number(t.amount), 0);
+
+  const avgIncome = Math.round(totalIncome / monthCount);
+  const avgExpense = Math.round(totalExpense / monthCount);
+  const avgDebtPayment = Math.round(totalDebtPayment / monthCount);
+
+  // Suggest a savings allocation as whatever's left after expenses + debt payment,
+  // floored at 0 so we never suggest a negative number.
+  const suggestedSavings = Math.max(0, avgIncome - avgExpense - avgDebtPayment);
+
+  return {
+    monthly_income: avgIncome,
+    fixed_expenses: avgExpense,
+    debt_allocation: avgDebtPayment,
+    savings_allocation: suggestedSavings,
+    hasHistoricalData: transactions.length > 0,
+  };
+}
+
+// ─── Debt trend (6 months) based on real payment history ─────────────────────
+// Walks backward from today's total remaining debt, adding back each month's
+// debt_payment transactions, so the trend line reflects actual repayment
+// history instead of a flat/fake line.
+export async function getDebtTrendData() {
+  const { supabase, userId } = await getSupabaseUser();
+
+  const [debtRes, txRes] = await Promise.all([
+    supabase.from("debts").select("remaining, status").eq("user_id", userId),
+    supabase.from("transactions").select("amount, date")
+      .eq("user_id", userId).eq("type", "debt_payment"),
+  ]);
+
+  const currentTotalRemaining = (debtRes.data ?? [])
+    .filter((d) => d.status === "active")
+    .reduce((s, d) => s + Number(d.remaining), 0);
+
+  const payments = txRes.data ?? [];
+
+  const months: { month: string; total: number }[] = [];
+  let runningRemaining = currentTotalRemaining;
+
+  // Build last 6 months, starting from current month going backward,
+  // then reverse so chart reads left-to-right chronologically.
+  const tempMonths: { key: string; label: string }[] = [];
+  for (let i = 0; i < 6; i++) {
+    const d = new Date();
+    d.setMonth(d.getMonth() - i);
+    tempMonths.push({
+      key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
+      label: d.toLocaleString("id-ID", { month: "short" }),
+    });
+  }
+
+  for (const { key, label } of tempMonths) {
+    months.push({ month: label, total: Math.max(0, runningRemaining) });
+    // Add back this month's payments to reconstruct what the balance was
+    // before this month's payments were made.
+    const paidThisMonth = payments
+      .filter((p) => p.date.slice(0, 7) === key)
+      .reduce((s, p) => s + Number(p.amount), 0);
+    runningRemaining += paidThisMonth;
+  }
+
+  return months.reverse();
 }
 
 // ─── Receivables (Piutang) ────────────────────────────────────────────────────

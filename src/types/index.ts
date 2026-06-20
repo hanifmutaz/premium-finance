@@ -60,12 +60,11 @@ export interface Debt {
   priority: DebtPriority;
   status: DebtStatus;
   notes?: string;
-  // ── Installment fields (nullable for non-installment debts) ──
-  is_installment?: boolean;
-  installment_amount?: number | null;
-  tenor_months?: number | null;
-  installments_paid?: number | null;
-  next_due_date?: string | null;
+  is_installment: boolean;
+  installment_amount?: number;
+  tenor_months?: number;
+  installments_paid: number;
+  next_due_date?: string;
   created_at: string;
   updated_at: string;
 }
@@ -179,7 +178,10 @@ export interface DashboardStats {
   monthly_expense: number;
   monthly_remaining: number;
   current_balance: number;
+  income_trend: number | null;
+  expense_trend: number | null;
   total_active_debt: number;
+  total_active_receivable: number;
   debt_paid_percentage: number;
   health_score: FinancialScore | null;
   nearest_due: Debt | null;
@@ -253,6 +255,29 @@ export interface Budget {
   total_planned: number;
   total_actual: number;
   categories: BudgetCategory[];
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ─── Recurring Transaction ─────────────────────────────────────────────────────
+export type RecurringFrequency = "monthly" | "weekly";
+
+export interface RecurringTransaction {
+  id: string;
+  user_id: string;
+  name: string;
+  type: "income" | "expense";
+  amount: number;
+  category_id?: string;
+  category?: Category;
+  payment_method: PaymentMethod;
+  frequency: RecurringFrequency;
+  day_of_period: number; // 1-31 for monthly, 0-6 for weekly (0=Sunday)
+  start_date: string;
+  end_date?: string;
+  is_active: boolean;
+  last_generated_date?: string;
   notes?: string;
   created_at: string;
   updated_at: string;

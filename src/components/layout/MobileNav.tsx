@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, ArrowLeftRight, CreditCard, MoreHorizontal,
   Target, Sparkles, TrendingUp, BarChart3, Settings, X,
-  Handshake, CalendarRange,
+  Handshake, CalendarRange, Repeat,
 } from "lucide-react";
 import { cn } from "@/utils";
 
@@ -17,6 +17,7 @@ const mainNav = [
 ];
 
 const moreNav = [
+  { href: "/recurring", label: "Berulang", icon: Repeat },
   { href: "/debts", label: "Utang", icon: CreditCard },
   { href: "/receivables", label: "Piutang", icon: Handshake },
   { href: "/goals", label: "Target", icon: Target },

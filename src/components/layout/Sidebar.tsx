@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Handshake,
   CalendarRange,
+  Repeat,
 } from "lucide-react";
 import { cn, getInitials } from "@/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -23,6 +24,7 @@ import { useEffect, useState } from "react";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/transactions", label: "Transaksi", icon: ArrowLeftRight },
+  { href: "/recurring", label: "Berulang", icon: Repeat },
   { href: "/budget", label: "Budget", icon: CalendarRange },
   { href: "/debts", label: "Utang", icon: CreditCard },
   { href: "/receivables", label: "Piutang", icon: Handshake },
