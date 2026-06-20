@@ -178,13 +178,13 @@ export interface DashboardStats {
   monthly_expense: number;
   monthly_remaining: number;
   current_balance: number;
-  income_trend: number | null;
-  expense_trend: number | null;
   total_active_debt: number;
-  total_active_receivable: number;
+  total_active_receivable?: number;
   debt_paid_percentage: number;
   health_score: FinancialScore | null;
   nearest_due: Debt | null;
+  income_trend?: number;
+  expense_trend?: number;
 }
 
 // ─── Chart Data ───────────────────────────────────────────────────────────────
