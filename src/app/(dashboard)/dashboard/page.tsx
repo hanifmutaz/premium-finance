@@ -73,7 +73,7 @@ export default function DashboardPage() {
 
   // Debt trend dari debts
   const debtTrend = debts.slice(0, 6).map((_, i) => ({
-    month: ["Jan","Feb","Mar","Apr","Mei","Jun"][i] ?? "—",
+    month: ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun"][i] ?? "—",
     total: stats.total_active_debt,
   }));
 

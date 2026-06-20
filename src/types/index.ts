@@ -183,8 +183,8 @@ export interface DashboardStats {
   debt_paid_percentage: number;
   health_score: FinancialScore | null;
   nearest_due: Debt | null;
-  income_trend?: number;
-  expense_trend?: number;
+  income_trend?: number | null;
+  expense_trend?: number | null;
 }
 
 // ─── Chart Data ───────────────────────────────────────────────────────────────
