@@ -180,11 +180,11 @@ export function exportToPDF(transactions: Transaction[], summary: ExportSummary,
         columnStyles: { 4: { halign: "right" } },
         margin: { left: 14, right: 14 },
         didDrawPage: () => {
-            const pageCount = doc.internal.getNumberOfPages();
+            const pageCount = (doc as any).internal.getNumberOfPages();
             doc.setFontSize(8);
             doc.setTextColor(150);
             doc.text(
-                `Halaman ${doc.internal.getCurrentPageInfo().pageNumber} / ${pageCount}`,
+                `Halaman ${(doc as any).internal.getCurrentPageInfo().pageNumber} / ${pageCount}`,
                 pageWidth - 30,
                 doc.internal.pageSize.getHeight() - 8
             );
