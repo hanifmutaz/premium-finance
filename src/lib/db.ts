@@ -920,3 +920,86 @@ export async function subscribeToNotifications(
     supabase.removeChannel(channel);
   };
 }
+
+// ─── Category breakdown (bulan ini, FULL — bukan dari 10 transaksi terakhir) ──
+// Dashboard sebelumnya bikin pie chart kategori dari `getTransactions({limit:10})`
+// (query yang sebenarnya buat list "Transaksi Terakhir"), jadi misleading kalau
+// user punya >10 transaksi sebulan. Ini query langsung semua expense bulan ini.
+export async function getCategoryBreakdown(): Promise<{ name: string; value: number }[]> {
+  const { supabase, userId } = await getSupabaseUser();
+
+  const now = new Date();
+  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split("T")[0];
+
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("amount, category:categories(name)")
+    .eq("user_id", userId)
+    .eq("type", "expense")
+    .gte("date", firstDay)
+    .lte("date", lastDay);
+  if (error) throw error;
+
+  const map: Record<string, number> = {};
+  ((data ?? []) as any[]).forEach((t) => {
+    const cat = t.category?.name ?? "Lainnya";
+    map[cat] = (map[cat] ?? 0) + Number(t.amount);
+  });
+
+  return Object.entries(map).map(([name, value]) => ({ name, value }));
+}
+
+// ─── Global Search ──────────────────────────────────────────────────────────
+export interface SearchResult {
+  id: string;
+  type: "debt" | "transaction" | "goal" | "wishlist" | "receivable";
+  title: string;
+  subtitle: string;
+  href: string;
+}
+
+export async function globalSearch(query: string): Promise<SearchResult[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const { supabase, userId } = await getSupabaseUser();
+  const like = `%${q}%`;
+
+  const [debts, transactions, goals, wishlist, receivables] = await Promise.all([
+    supabase.from("debts").select("id, name, lender").eq("user_id", userId).ilike("name", like).limit(5),
+    supabase.from("transactions").select("id, name, amount").eq("user_id", userId).ilike("name", like).limit(5),
+    supabase.from("goals").select("id, name, target_amount").eq("user_id", userId).ilike("name", like).limit(5),
+    supabase.from("wishlist").select("id, name, price").eq("user_id", userId).ilike("name", like).limit(5),
+    supabase.from("receivables").select("id, name, borrower, total_amount").eq("user_id", userId).ilike("name", like).limit(5),
+  ]);
+
+  const results: SearchResult[] = [];
+
+  (debts.data ?? []).forEach((d) =>
+    results.push({ id: d.id, type: "debt", title: d.name, subtitle: `Utang • ${d.lender}`, href: "/debts" })
+  );
+  (transactions.data ?? []).forEach((t) =>
+    results.push({
+      id: t.id, type: "transaction", title: t.name,
+      subtitle: `Transaksi • Rp ${Number(t.amount).toLocaleString("id-ID")}`, href: "/transactions",
+    })
+  );
+  (goals.data ?? []).forEach((g) =>
+    results.push({
+      id: g.id, type: "goal", title: g.name,
+      subtitle: `Tujuan • Rp ${Number(g.target_amount).toLocaleString("id-ID")}`, href: "/goals",
+    })
+  );
+  (wishlist.data ?? []).forEach((w) =>
+    results.push({
+      id: w.id, type: "wishlist", title: w.name,
+      subtitle: `Wishlist • Rp ${Number(w.price).toLocaleString("id-ID")}`, href: "/wishlist",
+    })
+  );
+  (receivables.data ?? []).forEach((r) =>
+    results.push({ id: r.id, type: "receivable", title: r.name, subtitle: `Piutang • ${r.borrower}`, href: "/receivables" })
+  );
+
+  return results;
+}

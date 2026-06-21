@@ -5,8 +5,13 @@ import { usePathname } from "next/navigation";
 import { Search, Bell } from "lucide-react";
 import { toast } from "sonner";
 import { NotificationPanel } from "@/components/shared/NotificationPanel";
-import { getNotifications, markNotificationRead, markAllNotificationsRead, subscribeToNotifications } from "@/lib/db";
+import { SearchDropdown } from "@/components/shared/SearchDropdown";
+import {
+  getNotifications, markNotificationRead, markAllNotificationsRead,
+  subscribeToNotifications, globalSearch,
+} from "@/lib/db";
 import type { Notification } from "@/types";
+import type { SearchResult } from "@/lib/db";
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "Financial Overview",
@@ -22,10 +27,34 @@ const pageTitles: Record<string, string> = {
 export function Header() {
   const pathname = usePathname();
   const [search, setSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [showNotif, setShowNotif] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
   const title = pageTitles[pathname] ?? "NOXOMOR Ledger";
+
+  // Debounced global search — tunggu 300ms setelah user berhenti ngetik
+  // biar gak nembak query tiap keystroke.
+  useEffect(() => {
+    if (search.trim().length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    setSearchLoading(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const results = await globalSearch(search);
+        setSearchResults(results);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [search]);
 
   useEffect(() => {
     async function loadNotifs() {
@@ -97,10 +126,22 @@ export function Header() {
         <input
           type="text"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Global search..."
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setShowSearch(true);
+          }}
+          onFocus={() => setShowSearch(true)}
+          placeholder="Cari utang, transaksi, goals..."
           className="w-56 md:w-72 bg-surface border border-border rounded-md pl-8 pr-3 py-1.5 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent transition-all duration-200"
         />
+        {showSearch && (
+          <SearchDropdown
+            results={searchResults}
+            loading={searchLoading}
+            query={search}
+            onClose={() => setShowSearch(false)}
+          />
+        )}
       </div>
 
       <div className="relative">

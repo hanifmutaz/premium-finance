@@ -1,15 +1,15 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import { TrendingUp, Calendar, Target, RefreshCw } from "lucide-react";
 import { formatCurrency, formatDate } from "@/utils";
 import { generateForecast } from "@/lib/calculations";
-import { mockDebts, mockDashboardStats } from "@/lib/mock-data";
-import type { ForecastInput } from "@/types";
+import { getDebts, getForecastDefaults } from "@/lib/db";
+import type { ForecastInput, Debt } from "@/types";
 
 const DEFAULT_INPUT: ForecastInput = {
   monthly_income: 12450000,
@@ -58,10 +58,38 @@ function CustomTooltip({ active, payload, label }: any) {
 export default function ForecastPage() {
   const [input, setInput] = useState<ForecastInput>(DEFAULT_INPUT);
   const [scenario, setScenario] = useState<"normal" | "best" | "worst">("normal");
+  const [debts, setDebts] = useState<Debt[]>([]);
+  const [defaults, setDefaults] = useState<ForecastInput>(DEFAULT_INPUT);
+  const [hasHistoricalData, setHasHistoricalData] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const totalDebt = mockDebts
+  useEffect(() => {
+    async function load() {
+      try {
+        const [d, fd] = await Promise.all([getDebts(), getForecastDefaults()]);
+        setDebts(d);
+        const realDefaults: ForecastInput = {
+          monthly_income: fd.monthly_income,
+          fixed_expenses: fd.fixed_expenses,
+          debt_allocation: fd.debt_allocation,
+          savings_allocation: fd.savings_allocation,
+        };
+        setDefaults(realDefaults);
+        setHasHistoricalData(fd.hasHistoricalData);
+        // Cuma pakai default real kalau user belum sempat ubah input manual.
+        setInput(realDefaults);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  const totalDebt = debts
     .filter((d) => d.status === "active")
-    .reduce((s, d) => s + d.remaining, 0);
+    .reduce((s, d) => s + Number(d.remaining), 0);
 
   const forecast = useMemo(
     () => generateForecast(input, totalDebt, 12),
@@ -76,12 +104,19 @@ export default function ForecastPage() {
 
   const surplus = input.monthly_income - input.fixed_expenses - input.debt_allocation - input.savings_allocation;
 
+  if (loading) {
+    return <div className="card-base h-96 animate-pulse bg-surface" />;
+  }
+
   return (
     <div className="space-y-5">
       {/* Header */}
       <div>
         <h1 className="text-lg font-semibold text-text-primary">Forecast Keuangan</h1>
-        <p className="text-sm text-text-secondary mt-0.5">Simulasi keuangan 12 bulan ke depan</p>
+        <p className="text-sm text-text-secondary mt-0.5">
+          Simulasi keuangan 12 bulan ke depan
+          {hasHistoricalData && " — angka awal dihitung dari rata-rata transaksi 3 bulan terakhir lo"}
+        </p>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
@@ -90,8 +125,9 @@ export default function ForecastPage() {
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-text-primary">Parameter Simulasi</h3>
             <button
-              onClick={() => setInput(DEFAULT_INPUT)}
+              onClick={() => setInput(defaults)}
               className="text-accent hover:text-text-primary transition-colors"
+              title="Reset ke rata-rata transaksi real lo"
             >
               <RefreshCw size={14} />
             </button>

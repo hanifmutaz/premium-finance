@@ -8,7 +8,7 @@ import { FinancialGoalsWidget } from "@/components/dashboard/FinancialGoals";
 import { HealthScoreWidget } from "@/components/dashboard/HealthScore";
 import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { StatCardSkeleton } from "@/components/shared/Skeleton";
-import { getDashboardStats, getMonthlyChartData, getDebts, getGoals, getTransactions } from "@/lib/db";
+import { getDashboardStats, getMonthlyChartData, getDebts, getGoals, getTransactions, getDebtTrendData, getCategoryBreakdown } from "@/lib/db";
 import { calculateHealthScore } from "@/lib/calculations";
 import type { DashboardStats, MonthlyChartData, Debt, Goal, Transaction } from "@/types";
 
@@ -18,17 +18,21 @@ export default function DashboardPage() {
   const [debts, setDebts] = useState<Debt[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [debtTrend, setDebtTrend] = useState<{ month: string; total: number }[]>([]);
+  const [categoryData, setCategoryData] = useState<{ name: string; value: number; color: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const [s, m, d, g, t] = await Promise.all([
+        const [s, m, d, g, t, dt, cb] = await Promise.all([
           getDashboardStats(),
           getMonthlyChartData(),
           getDebts(),
           getGoals(),
           getTransactions({ limit: 10 }),
+          getDebtTrendData(),
+          getCategoryBreakdown(),
         ]);
 
         // Calculate health score
@@ -45,6 +49,8 @@ export default function DashboardPage() {
         setDebts(d);
         setGoals(g);
         setTransactions(t);
+        setDebtTrend(dt);
+        setCategoryData(cb.map((c) => ({ ...c, color: "#64748B" })));
       } catch (err) {
         console.error(err);
       } finally {
@@ -71,21 +77,8 @@ export default function DashboardPage() {
 
   if (!stats) return null;
 
-  // Debt trend dari debts
-  const debtTrend = debts.slice(0, 6).map((_, i) => ({
-    month: ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun"][i] ?? "—",
-    total: stats.total_active_debt,
-  }));
-
-  // Category data dari transactions
-  const categoryMap: Record<string, number> = {};
-  transactions.filter((t) => t.type === "expense").forEach((t) => {
-    const cat = t.category?.name ?? "Lainnya";
-    categoryMap[cat] = (categoryMap[cat] ?? 0) + t.amount;
-  });
-  const categoryData = Object.entries(categoryMap).map(([name, value]) => ({
-    name, value, color: "#64748B",
-  }));
+  // Debt trend & category breakdown sekarang dari getDebtTrendData() / getCategoryBreakdown()
+  // (data real, bukan diturunkan dari array transaksi yang udah di-limit 10).
 
   return (
     <div className="space-y-5">
