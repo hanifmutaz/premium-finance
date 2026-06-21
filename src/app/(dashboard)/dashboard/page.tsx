@@ -5,12 +5,14 @@ import { DashboardStatCards } from "@/components/dashboard/StatCards";
 import { IncomeExpenseChart, BalanceTrendChart, DebtTrendChart, CategoryPieChart } from "@/components/dashboard/Charts";
 import { DebtOverviewWidget } from "@/components/dashboard/DebtOverview";
 import { FinancialGoalsWidget } from "@/components/dashboard/FinancialGoals";
+import { SavingsOverviewWidget } from "@/components/dashboard/SavingsOverview";
 import { HealthScoreWidget } from "@/components/dashboard/HealthScore";
 import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { StatCardSkeleton } from "@/components/shared/Skeleton";
-import { getDashboardStats, getMonthlyChartData, getDebts, getGoals, getTransactions, getDebtTrendData, getCategoryBreakdown } from "@/lib/db";
+import { getDashboardStats, getMonthlyChartData, getDebts, getGoals, getTransactions, getDebtTrendData, getCategoryBreakdown, getSavingsOverview } from "@/lib/db";
 import { calculateHealthScore } from "@/lib/calculations";
 import type { DashboardStats, MonthlyChartData, Debt, Goal, Transaction } from "@/types";
+import type { SavingsOverview } from "@/lib/db";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -20,12 +22,13 @@ export default function DashboardPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [debtTrend, setDebtTrend] = useState<{ month: string; total: number }[]>([]);
   const [categoryData, setCategoryData] = useState<{ name: string; value: number; color: string }[]>([]);
+  const [savings, setSavings] = useState<SavingsOverview | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const [s, m, d, g, t, dt, cb] = await Promise.all([
+        const [s, m, d, g, t, dt, cb, sv] = await Promise.all([
           getDashboardStats(),
           getMonthlyChartData(),
           getDebts(),
@@ -33,6 +36,7 @@ export default function DashboardPage() {
           getTransactions({ limit: 10 }),
           getDebtTrendData(),
           getCategoryBreakdown(),
+          getSavingsOverview(),
         ]);
 
         // Calculate health score
@@ -51,6 +55,7 @@ export default function DashboardPage() {
         setTransactions(t);
         setDebtTrend(dt);
         setCategoryData(cb.map((c) => ({ ...c, color: "#64748B" })));
+        setSavings(sv);
       } catch (err) {
         console.error(err);
       } finally {
@@ -94,14 +99,14 @@ export default function DashboardPage() {
         <FinancialGoalsWidget goals={goals} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-1">
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div>
           {stats.health_score && <HealthScoreWidget score={stats.health_score} />}
         </div>
-        <div className="lg:col-span-1">
+        <div>
           <DebtTrendChart data={debtTrend} />
         </div>
-        <div className="lg:col-span-1">
+        <div>
           {categoryData.length > 0
             ? <CategoryPieChart data={categoryData} />
             : (
@@ -110,6 +115,9 @@ export default function DashboardPage() {
               </div>
             )
           }
+        </div>
+        <div>
+          {savings && <SavingsOverviewWidget data={savings} />}
         </div>
       </div>
 

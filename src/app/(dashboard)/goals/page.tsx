@@ -9,8 +9,9 @@ import { PriorityBadge } from "@/components/shared/Badges";
 import { ProgressBar } from "@/components/shared/ProgressBar";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { AddSavingButton } from "@/components/shared/AddSavingButton";
 import { GoalFormModal } from "@/components/goals/GoalFormModal";
-import { getGoals, deleteGoal } from "@/lib/db";
+import { getGoals, deleteGoal, updateGoalAmount } from "@/lib/db";
 import { toast } from "sonner";
 import type { Goal } from "@/types";
 
@@ -39,6 +40,18 @@ export default function GoalsPage() {
   async function handleDelete(id: string) {
     try { await deleteGoal(id); toast.success("Target dihapus"); load(); }
     catch { toast.error("Gagal menghapus"); }
+  }
+
+  async function handleAddSaving(goal: Goal, amount: number) {
+    try {
+      const updated = await updateGoalAmount(goal.id, Number(goal.current_amount) + amount);
+      toast.success(
+        updated.status === "completed" ? "Target tercapai! 🎉" : "Tabungan ditambahkan"
+      );
+      load();
+    } catch {
+      toast.error("Gagal menambah tabungan");
+    }
   }
 
   function openAdd() {
@@ -165,6 +178,9 @@ export default function GoalsPage() {
                       isOnTrack ? "bg-success/10 text-success" : "bg-warning/10 text-warning")}>
                       {isOnTrack ? <TrendingUp size={12} /> : <AlertTriangle size={12} />}
                       {isOnTrack ? `On track! Sisa ${monthsLeft} bulan` : "Risiko terlambat — perlu ditingkatkan"}
+                    </div>
+                    <div className="mt-3">
+                      <AddSavingButton onAdd={(amount) => handleAddSaving(goal, amount)} />
                     </div>
                   </>
                 )}

@@ -9,8 +9,9 @@ import { ProgressBar } from "@/components/shared/ProgressBar";
 import { PriorityBadge } from "@/components/shared/Badges";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { AddSavingButton } from "@/components/shared/AddSavingButton";
 import { WishlistFormModal } from "@/components/wishlist/WishlistFormModal";
-import { getWishlist, deleteWishlistItem } from "@/lib/db";
+import { getWishlist, deleteWishlistItem, updateWishlistSaving } from "@/lib/db";
 import { toast } from "sonner";
 import type { Wishlist } from "@/types";
 
@@ -38,6 +39,16 @@ export default function WishlistPage() {
   async function handleDelete(id: string) {
     try { await deleteWishlistItem(id); toast.success("Item dihapus"); load(); }
     catch { toast.error("Gagal menghapus"); }
+  }
+
+  async function handleAddSaving(item: Wishlist, amount: number) {
+    try {
+      await updateWishlistSaving(item.id, Number(item.saved_amount) + amount);
+      toast.success("Tabungan ditambahkan");
+      load();
+    } catch {
+      toast.error("Gagal menambah tabungan");
+    }
   }
 
   function openAdd() {
@@ -97,7 +108,8 @@ export default function WishlistPage() {
               <h2 className="text-sm font-semibold text-text-secondary uppercase tracking-wider mb-3">Dalam Daftar ({pending.length})</h2>
               <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                 {pending.map((item) => (
-                  <WishlistCard key={item.id} item={item} onEdit={() => openEdit(item)} onDelete={() => setDeleteId(item.id)} />
+                  <WishlistCard key={item.id} item={item} onEdit={() => openEdit(item)} onDelete={() => setDeleteId(item.id)}
+                    onAddSaving={(amount) => handleAddSaving(item, amount)} />
                 ))}
               </div>
             </div>
@@ -123,7 +135,9 @@ export default function WishlistPage() {
   );
 }
 
-function WishlistCard({ item, onEdit, onDelete }: { item: Wishlist; onEdit: () => void; onDelete: () => void }) {
+function WishlistCard({ item, onEdit, onDelete, onAddSaving }: {
+  item: Wishlist; onEdit: () => void; onDelete: () => void; onAddSaving?: (amount: number) => Promise<void>;
+}) {
   const { remaining, percentage, monthsNeeded, canBuy, recommendation } = calcWishlistProgress(item, MONTHLY_SURPLUS);
   const isPurchased = item.status === "purchased";
 
@@ -188,6 +202,11 @@ function WishlistCard({ item, onEdit, onDelete }: { item: Wishlist; onEdit: () =
             {canBuy ? <CheckCircle2 size={12} className="mt-0.5 shrink-0" /> : <Clock size={12} className="mt-0.5 shrink-0" />}
             <span className="leading-relaxed">{recommendation}</span>
           </div>
+          {onAddSaving && (
+            <div className="mt-3">
+              <AddSavingButton onAdd={onAddSaving} />
+            </div>
+          )}
         </>
       )}
 
