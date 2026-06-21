@@ -396,6 +396,23 @@ export async function getSavingsOverview(): Promise<SavingsOverview> {
   };
 }
 
+// ─── Cumulative Savings (real, sejak transaksi pertama) ────────────────────
+// Beda sama getSavingsOverview() (yang itu cuma rollup dari Goals+Wishlist).
+// Ini total surplus murni (semua pemasukan - semua pengeluaran) dari transaksi
+// pertama user sampai sekarang — gak peduli udah dialokasikan ke target atau belum.
+export async function getCumulativeSavings(): Promise<number> {
+  const { supabase, userId } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("type, amount")
+    .eq("user_id", userId);
+  if (error) throw error;
+
+  const income = (data ?? []).filter((t) => t.type === "income").reduce((s, t) => s + Number(t.amount), 0);
+  const expense = (data ?? []).filter((t) => t.type !== "income").reduce((s, t) => s + Number(t.amount), 0);
+  return income - expense;
+}
+
 export async function updateWishlistSaving(id: string, saved_amount: number) {
   const { supabase } = await getSupabaseUser();
   // Catatan: sengaja gak auto-ubah status ke "saved" di sini — halaman /wishlist

@@ -9,7 +9,7 @@ import { SavingsOverviewWidget } from "@/components/dashboard/SavingsOverview";
 import { HealthScoreWidget } from "@/components/dashboard/HealthScore";
 import { RecentTransactions } from "@/components/dashboard/RecentTransactions";
 import { StatCardSkeleton } from "@/components/shared/Skeleton";
-import { getDashboardStats, getMonthlyChartData, getDebts, getGoals, getTransactions, getDebtTrendData, getCategoryBreakdown, getSavingsOverview } from "@/lib/db";
+import { getDashboardStats, getMonthlyChartData, getDebts, getGoals, getTransactions, getDebtTrendData, getCategoryBreakdown, getSavingsOverview, getCumulativeSavings } from "@/lib/db";
 import { calculateHealthScore } from "@/lib/calculations";
 import type { DashboardStats, MonthlyChartData, Debt, Goal, Transaction } from "@/types";
 import type { SavingsOverview } from "@/lib/db";
@@ -23,12 +23,13 @@ export default function DashboardPage() {
   const [debtTrend, setDebtTrend] = useState<{ month: string; total: number }[]>([]);
   const [categoryData, setCategoryData] = useState<{ name: string; value: number; color: string }[]>([]);
   const [savings, setSavings] = useState<SavingsOverview | null>(null);
+  const [cumulativeSavings, setCumulativeSavings] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
-        const [s, m, d, g, t, dt, cb, sv] = await Promise.all([
+        const [s, m, d, g, t, dt, cb, sv, cs] = await Promise.all([
           getDashboardStats(),
           getMonthlyChartData(),
           getDebts(),
@@ -37,6 +38,7 @@ export default function DashboardPage() {
           getDebtTrendData(),
           getCategoryBreakdown(),
           getSavingsOverview(),
+          getCumulativeSavings(),
         ]);
 
         // Calculate health score
@@ -56,6 +58,7 @@ export default function DashboardPage() {
         setDebtTrend(dt);
         setCategoryData(cb.map((c) => ({ ...c, color: "#64748B" })));
         setSavings(sv);
+        setCumulativeSavings(cs);
       } catch (err) {
         console.error(err);
       } finally {
@@ -117,7 +120,7 @@ export default function DashboardPage() {
           }
         </div>
         <div>
-          {savings && <SavingsOverviewWidget data={savings} />}
+          {savings && <SavingsOverviewWidget data={savings} cumulative={cumulativeSavings} />}
         </div>
       </div>
 
