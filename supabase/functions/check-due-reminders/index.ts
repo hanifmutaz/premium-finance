@@ -40,10 +40,24 @@ Deno.serve(async (_req) => {
     return due >= today && due <= in7days;
   });
 
+  // ── Skip users who turned off "Jatuh tempo utang" notifications ──────────
+  const ownerIds = [...new Set(dueSoonDebts.map((d) => d.user_id))];
+  const { data: profiles } = ownerIds.length > 0
+    ? await supabase.from("profiles").select("id, notification_preferences").in("id", ownerIds)
+    : { data: [] as { id: string; notification_preferences: Record<string, boolean> | null }[] };
+
+  const debtDueDisabledUsers = new Set(
+    (profiles ?? [])
+      .filter((p) => p.notification_preferences?.debt_due === false)
+      .map((p) => p.id)
+  );
+
+  const eligibleDebts = dueSoonDebts.filter((d) => !debtDueDisabledUsers.has(d.user_id));
+
   let notificationsSent = 0;
   const errors: string[] = [];
 
-  for (const debt of dueSoonDebts) {
+  for (const debt of eligibleDebts) {
     const dueStr = debt.is_installment && debt.next_due_date ? debt.next_due_date : debt.due_date;
 
     // Check if notification already sent today for this debt
@@ -108,7 +122,7 @@ Deno.serve(async (_req) => {
   return new Response(
     JSON.stringify({
       success: true,
-      debtsChecked: dueSoonDebts.length,
+      debtsChecked: eligibleDebts.length,
       notificationsSent,
       errors,
     }),

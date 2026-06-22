@@ -8,6 +8,8 @@ import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { isPushSupported, getPushPermissionStatus, subscribeToPush, unsubscribeFromPush, isSubscribed } from "@/lib/push-notifications";
 import { CategoryManager } from "@/components/settings/CategoryManager";
+import { getNotificationPreferences, updateNotificationPreferences } from "@/lib/db";
+import type { NotificationPreferences } from "@/lib/db";
 
 const settingsSections = [
   { id: "profile", label: "Profil", icon: User },
@@ -23,6 +25,31 @@ export default function SettingsPage() {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPreferences | null>(null);
+  const [notifPrefsLoading, setNotifPrefsLoading] = useState(true);
+  const [notifPrefsSaving, setNotifPrefsSaving] = useState<keyof NotificationPreferences | null>(null);
+
+  useEffect(() => {
+    getNotificationPreferences()
+      .then(setNotifPrefs)
+      .catch(() => toast.error("Gagal memuat preferensi notifikasi"))
+      .finally(() => setNotifPrefsLoading(false));
+  }, []);
+
+  async function handleToggleNotifPref(key: keyof NotificationPreferences) {
+    if (!notifPrefs) return;
+    const newValue = !notifPrefs[key];
+    setNotifPrefs({ ...notifPrefs, [key]: newValue }); // optimistic
+    setNotifPrefsSaving(key);
+    try {
+      await updateNotificationPreferences({ [key]: newValue });
+    } catch {
+      setNotifPrefs(notifPrefs); // revert on failure
+      toast.error("Gagal menyimpan preferensi");
+    } finally {
+      setNotifPrefsSaving(null);
+    }
+  }
 
   useEffect(() => {
     async function load() {
@@ -162,15 +189,26 @@ export default function SettingsPage() {
               <PushNotificationCard />
 
               <div className="space-y-4">
-                {[
-                  { label: "Jatuh tempo utang", desc: "Notifikasi 7 hari sebelum jatuh tempo", defaultOn: true },
-                  { label: "Target pelunasan", desc: "Reminder progress target bulanan", defaultOn: true },
-                  { label: "Tagihan rutin", desc: "Pengingat tagihan bulanan", defaultOn: false },
-                  { label: "Wishlist update", desc: "Update progress tabungan wishlist", defaultOn: false },
-                  { label: "Health score report", desc: "Laporan mingguan financial health", defaultOn: true },
-                ].map(({ label, desc, defaultOn }) => (
-                  <ToggleRow key={label} label={label} desc={desc} defaultOn={defaultOn} />
-                ))}
+                {notifPrefsLoading ? (
+                  <div className="py-6 text-center text-text-secondary text-sm">Memuat preferensi...</div>
+                ) : (
+                  [
+                    { key: "debt_due" as const, label: "Jatuh tempo utang", desc: "Notifikasi 7 hari sebelum jatuh tempo" },
+                    { key: "goal_reminder" as const, label: "Target pelunasan", desc: "Reminder progress target bulanan" },
+                    { key: "recurring_bill" as const, label: "Tagihan rutin", desc: "Pengingat tagihan bulanan" },
+                    { key: "wishlist_update" as const, label: "Wishlist update", desc: "Update progress tabungan wishlist" },
+                    { key: "health_score_weekly" as const, label: "Health score report", desc: "Laporan mingguan financial health" },
+                  ].map(({ key, label, desc }) => (
+                    <ToggleRow
+                      key={key}
+                      label={label}
+                      desc={desc}
+                      checked={notifPrefs?.[key] ?? false}
+                      disabled={notifPrefsSaving === key}
+                      onToggle={() => handleToggleNotifPref(key)}
+                    />
+                  ))
+                )}
               </div>
             </>
           )}
@@ -345,8 +383,9 @@ function PushNotificationCard() {
     </div>
   );
 }
-function ToggleRow({ label, desc, defaultOn }: { label: string; desc: string; defaultOn: boolean }) {
-  const [on, setOn] = useState(defaultOn);
+function ToggleRow({ label, desc, checked, onToggle, disabled }: {
+  label: string; desc: string; checked: boolean; onToggle: () => void; disabled?: boolean;
+}) {
   return (
     <div className="flex items-center justify-between p-4 bg-surface rounded-lg border border-border">
       <div className="flex-1 pr-4">
@@ -354,16 +393,17 @@ function ToggleRow({ label, desc, defaultOn }: { label: string; desc: string; de
         <p className="text-xs text-text-secondary mt-0.5">{desc}</p>
       </div>
       <button
-        onClick={() => setOn(!on)}
+        onClick={onToggle}
+        disabled={disabled}
         className={cn(
-          "relative shrink-0 inline-flex items-center rounded-full transition-colors duration-200 h-6 w-11 px-0.5",
-          on ? "bg-success" : "bg-border"
+          "relative shrink-0 inline-flex items-center rounded-full transition-colors duration-200 h-6 w-11 px-0.5 disabled:opacity-50",
+          checked ? "bg-success" : "bg-border"
         )}
       >
         <span
           className={cn(
             "inline-block h-5 w-5 rounded-full bg-white shadow-md transition-transform duration-200",
-            on ? "translate-x-5" : "translate-x-0"
+            checked ? "translate-x-5" : "translate-x-0"
           )}
         />
       </button>

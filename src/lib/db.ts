@@ -916,6 +916,47 @@ export async function updateBudget(id: string, budget: {
 // hari itu, di sini kita juga hitung "live alert" langsung dari tabel `debts`
 // setiap kali fungsi ini dipanggil, lalu di-merge (dan di-dedupe) dengan yang
 // sudah persisted di DB.
+// ─── Notification Preferences ──────────────────────────────────────────────
+export interface NotificationPreferences {
+  debt_due: boolean;
+  goal_reminder: boolean;
+  recurring_bill: boolean;
+  wishlist_update: boolean;
+  health_score_weekly: boolean;
+}
+
+const DEFAULT_NOTIF_PREFS: NotificationPreferences = {
+  debt_due: true,
+  goal_reminder: true,
+  recurring_bill: false,
+  wishlist_update: false,
+  health_score_weekly: true,
+};
+
+export async function getNotificationPreferences(): Promise<NotificationPreferences> {
+  const { supabase, userId } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("notification_preferences")
+    .eq("id", userId)
+    .single();
+  if (error) throw error;
+  return { ...DEFAULT_NOTIF_PREFS, ...(data?.notification_preferences ?? {}) };
+}
+
+export async function updateNotificationPreferences(prefs: Partial<NotificationPreferences>) {
+  const { supabase, userId } = await getSupabaseUser();
+  const current = await getNotificationPreferences();
+  const updated = { ...current, ...prefs };
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({ notification_preferences: updated })
+    .eq("id", userId);
+  if (error) throw error;
+  return updated;
+}
+
 export async function getNotifications(): Promise<Notification[]> {
   const { supabase, userId } = await getSupabaseUser();
 
@@ -924,7 +965,7 @@ export async function getNotifications(): Promise<Notification[]> {
   const in7Days = new Date(today);
   in7Days.setDate(in7Days.getDate() + 7);
 
-  const [{ data: stored, error: storedError }, { data: debts, error: debtsError }] = await Promise.all([
+  const [{ data: stored, error: storedError }, { data: debts, error: debtsError }, prefs] = await Promise.all([
     supabase
       .from("notifications")
       .select("*")
@@ -936,11 +977,17 @@ export async function getNotifications(): Promise<Notification[]> {
       .select("id, name, due_date, next_due_date, is_installment, remaining")
       .eq("user_id", userId)
       .eq("status", "active"),
+    getNotificationPreferences(),
   ]);
   if (storedError) throw storedError;
   if (debtsError) throw debtsError;
 
-  const storedNotifs = (stored ?? []) as Notification[];
+  // User matiin toggle "Jatuh tempo utang" — jangan tampilin debt_due sama
+  // sekali, baik yang udah persisted (dari cron) maupun yang live-generated.
+  const debtDueEnabled = prefs.debt_due;
+
+  const storedNotifs = ((stored ?? []) as Notification[])
+    .filter((n) => debtDueEnabled || n.type !== "debt_due");
 
   // Kalau cron sudah pernah insert notif debt_due untuk debt ini hari ini,
   // jangan tampilkan versi "live" lagi biar gak dobel.
@@ -950,7 +997,7 @@ export async function getNotifications(): Promise<Notification[]> {
       .map((n) => n.reference_id)
   );
 
-  const liveNotifs: Notification[] = (debts ?? [])
+  const liveNotifs: Notification[] = !debtDueEnabled ? [] : (debts ?? [])
     .map((d): Notification | null => {
       const dueStr = d.is_installment && d.next_due_date ? d.next_due_date : d.due_date;
       if (!dueStr || alreadyNotifiedToday.has(d.id)) return null;
