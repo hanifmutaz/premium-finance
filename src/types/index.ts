@@ -21,7 +21,7 @@ export interface Category {
 }
 
 // ─── Transaction ─────────────────────────────────────────────────────────────
-export type TransactionType = "income" | "expense" | "debt_payment" | "transfer";
+export type TransactionType = "income" | "expense" | "debt_payment" | "transfer" | "saving";
 export type TransactionStatus = "completed" | "pending" | "failed";
 export type PaymentMethod = "cash" | "transfer" | "credit_card" | "debit_card" | "e-wallet" | "other";
 

@@ -2,7 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useMemo, useEffect } from "react";
-import { Plus, Search, ArrowUpRight, ArrowDownLeft, CreditCard, ArrowLeftRight, Trash2, Pencil } from "lucide-react";
+import { Plus, Search, ArrowUpRight, ArrowDownLeft, CreditCard, ArrowLeftRight, PiggyBank, Trash2, Pencil } from "lucide-react";
 import { formatCurrency, formatDate, cn } from "@/utils";
 import { StatusBadge } from "@/components/shared/Badges";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -17,6 +17,7 @@ const typeFilters: { label: string; value: TransactionType | "all" }[] = [
   { label: "Pemasukan", value: "income" },
   { label: "Pengeluaran", value: "expense" },
   { label: "Bayar Utang", value: "debt_payment" },
+  { label: "Tabungan", value: "saving" },
 ];
 
 const typeIcon = {
@@ -24,6 +25,7 @@ const typeIcon = {
   expense: <ArrowUpRight size={13} className="text-danger" />,
   debt_payment: <CreditCard size={13} className="text-warning" />,
   transfer: <ArrowLeftRight size={13} className="text-text-secondary" />,
+  saving: <PiggyBank size={13} className="text-accent" />,
 };
 
 export default function TransactionsPage() {

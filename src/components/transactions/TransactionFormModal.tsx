@@ -109,9 +109,9 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
           <button onClick={onClose} className="text-accent hover:text-text-primary transition-colors"><X size={16} /></button>
         </div>
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          <div className="grid grid-cols-4 gap-1.5 p-1 bg-surface rounded-lg">
-            {(["income", "expense", "debt_payment", "transfer"] as TransactionType[]).map((t) => {
-              const labels = { income: "Masuk", expense: "Keluar", debt_payment: "Utang", transfer: "Transfer" };
+          <div className="grid grid-cols-3 gap-1.5 p-1 bg-surface rounded-lg">
+            {(["income", "expense", "debt_payment", "transfer", "saving"] as TransactionType[]).map((t) => {
+              const labels = { income: "Masuk", expense: "Keluar", debt_payment: "Utang", transfer: "Transfer", saving: "Nabung" };
               return (
                 <button key={t} type="button" onClick={() => setType(t)}
                   className={cn("py-1.5 rounded-md text-xs font-medium transition-colors",

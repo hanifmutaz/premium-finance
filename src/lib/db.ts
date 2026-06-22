@@ -79,8 +79,9 @@ export async function addTransaction(tx: Omit<Transaction, "id" | "user_id" | "c
     });
   }
 
-  // Sync to active budget if this is an expense with a matching category
-  if (tx.type === "expense" && data.category?.name) {
+  // Sync to active budget if this is an expense (or debt payment with a
+  // chosen category) that matches a budget category by name.
+  if ((tx.type === "expense" || tx.type === "debt_payment") && data.category?.name) {
     await syncBudgetActual(userId, data.category.name, tx.amount, tx.date);
   }
 
@@ -154,7 +155,7 @@ export async function deleteTransaction(id: string) {
   const { error } = await supabase.from("transactions").delete().eq("id", id);
   if (error) throw error;
 
-  if (tx && tx.type === "expense" && tx.category?.name) {
+  if (tx && (tx.type === "expense" || tx.type === "debt_payment") && tx.category?.name) {
     await syncBudgetActual(userId, tx.category.name, -Number(tx.amount), tx.date);
   }
 
@@ -187,11 +188,11 @@ export async function updateTransaction(
     .single();
   if (error) throw error;
 
-  // Reverse old sync, then apply new sync (only relevant for expense type)
-  if (original && original.type === "expense" && original.category?.name) {
+  // Reverse old sync, then apply new sync (relevant for expense & debt_payment)
+  if (original && (original.type === "expense" || original.type === "debt_payment") && original.category?.name) {
     await syncBudgetActual(userId, original.category.name, -Number(original.amount), original.date);
   }
-  if (data.type === "expense" && data.category?.name) {
+  if ((data.type === "expense" || data.type === "debt_payment") && data.category?.name) {
     await syncBudgetActual(userId, data.category.name, Number(data.amount), data.date);
   }
 
@@ -397,20 +398,19 @@ export async function getSavingsOverview(): Promise<SavingsOverview> {
 }
 
 // ─── Cumulative Savings (real, sejak transaksi pertama) ────────────────────
-// Beda sama getSavingsOverview() (yang itu cuma rollup dari Goals+Wishlist).
-// Ini total surplus murni (semua pemasukan - semua pengeluaran) dari transaksi
-// pertama user sampai sekarang — gak peduli udah dialokasikan ke target atau belum.
+// Sum dari semua transaksi tipe "saving" — uang yang SENGAJA dipindahin ke
+// tabungan, bukan sisa/leftover income-expense. Beda sama getSavingsOverview()
+// (yang itu rollup dari progress Goals+Wishlist).
 export async function getCumulativeSavings(): Promise<number> {
   const { supabase, userId } = await getSupabaseUser();
   const { data, error } = await supabase
     .from("transactions")
-    .select("type, amount")
-    .eq("user_id", userId);
+    .select("amount")
+    .eq("user_id", userId)
+    .eq("type", "saving");
   if (error) throw error;
 
-  const income = (data ?? []).filter((t) => t.type === "income").reduce((s, t) => s + Number(t.amount), 0);
-  const expense = (data ?? []).filter((t) => t.type !== "income").reduce((s, t) => s + Number(t.amount), 0);
-  return income - expense;
+  return (data ?? []).reduce((s, t) => s + Number(t.amount), 0);
 }
 
 export async function updateWishlistSaving(id: string, saved_amount: number) {

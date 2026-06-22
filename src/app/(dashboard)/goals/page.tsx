@@ -11,7 +11,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { AddSavingButton } from "@/components/shared/AddSavingButton";
 import { GoalFormModal } from "@/components/goals/GoalFormModal";
-import { getGoals, deleteGoal, updateGoalAmount } from "@/lib/db";
+import { getGoals, deleteGoal, updateGoalAmount, addTransaction } from "@/lib/db";
 import { toast } from "sonner";
 import type { Goal } from "@/types";
 
@@ -45,6 +45,14 @@ export default function GoalsPage() {
   async function handleAddSaving(goal: Goal, amount: number) {
     try {
       const updated = await updateGoalAmount(goal.id, Number(goal.current_amount) + amount);
+      await addTransaction({
+        type: "saving",
+        name: `Nabung: ${goal.name}`,
+        amount,
+        date: new Date().toISOString().split("T")[0],
+        payment_method: "transfer",
+        status: "completed",
+      });
       toast.success(
         updated.status === "completed" ? "Target tercapai! 🎉" : "Tabungan ditambahkan"
       );

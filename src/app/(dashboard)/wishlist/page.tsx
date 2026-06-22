@@ -11,7 +11,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { AddSavingButton } from "@/components/shared/AddSavingButton";
 import { WishlistFormModal } from "@/components/wishlist/WishlistFormModal";
-import { getWishlist, deleteWishlistItem, updateWishlistSaving } from "@/lib/db";
+import { getWishlist, deleteWishlistItem, updateWishlistSaving, addTransaction } from "@/lib/db";
 import { toast } from "sonner";
 import type { Wishlist } from "@/types";
 
@@ -44,6 +44,14 @@ export default function WishlistPage() {
   async function handleAddSaving(item: Wishlist, amount: number) {
     try {
       await updateWishlistSaving(item.id, Number(item.saved_amount) + amount);
+      await addTransaction({
+        type: "saving",
+        name: `Nabung: ${item.name}`,
+        amount,
+        date: new Date().toISOString().split("T")[0],
+        payment_method: "transfer",
+        status: "completed",
+      });
       toast.success("Tabungan ditambahkan");
       load();
     } catch {

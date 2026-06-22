@@ -19,15 +19,15 @@ export function SavingsOverviewWidget({
         <h3 className="text-sm font-semibold text-text-primary">Tabungan</h3>
       </div>
 
-      {/* Angka utama: total surplus murni (income - expense) sejak transaksi pertama.
-          Ini BUKAN cuma yang dialokasikan ke Goals/Wishlist — ini total beneran. */}
+      {/* Angka utama: total dari transaksi bertipe "saving" — uang yang sengaja
+          dipindahin ke tabungan, BUKAN sisa/leftover income-expense. */}
       <div className="mb-4">
-        <p className="text-[10px] text-accent uppercase tracking-wider mb-1">Total Tabungan (akumulatif)</p>
+        <p className="text-[10px] text-accent uppercase tracking-wider mb-1">Total Tabungan</p>
         <p className={cumulative >= 0 ? "text-2xl font-semibold text-success tabular-nums" : "text-2xl font-semibold text-danger tabular-nums"}>
           {formatCurrency(cumulative, true)}
         </p>
         <p className="text-xs text-text-secondary mt-0.5">
-          Total pemasukan − pengeluaran sejak transaksi pertama
+          Total transaksi &quot;Nabung&quot; sejak pertama kali
         </p>
       </div>
 

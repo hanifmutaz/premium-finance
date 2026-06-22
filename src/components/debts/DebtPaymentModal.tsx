@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { X, Loader2, CreditCard, Calendar, Repeat } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency, formatDate } from "@/utils";
-import { addTransaction } from "@/lib/db";
+import { addTransaction, getCategories } from "@/lib/db";
 import type { Debt } from "@/types";
 
 interface Props { debt: Debt | null; open: boolean; onClose: () => void; }
@@ -13,6 +13,8 @@ export function DebtPaymentModal({ debt, open, onClose }: Props) {
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
   const [notes, setNotes] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
 
   // Pre-fill with installment amount if this is a scheduled installment debt
   useEffect(() => {
@@ -23,7 +25,14 @@ export function DebtPaymentModal({ debt, open, onClose }: Props) {
       setAmount("");
     }
     setNotes("");
+    setCategoryId("");
   }, [open, debt]);
+
+  // Kategori opsional — kalau dipilih (misal "Cicilan"), pembayaran ini akan
+  // ikut nambah "Realisasi" di Budget bulan ini kalau ada kategori yang cocok.
+  useEffect(() => {
+    if (open) getCategories("expense").then(setCategories).catch(() => {});
+  }, [open]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -44,6 +53,7 @@ export function DebtPaymentModal({ debt, open, onClose }: Props) {
         type: "debt_payment",
         name: `Bayar Utang: ${debt.name}`,
         description: notes || installmentNum || undefined,
+        category_id: categoryId || undefined,
         amount: val,
         date: new Date().toISOString().split("T")[0],
         payment_method: "transfer",
@@ -51,7 +61,7 @@ export function DebtPaymentModal({ debt, open, onClose }: Props) {
         debt_id: debt.id,
       });
       toast.success(`Pembayaran ${formatCurrency(val)} berhasil dicatat`);
-      setAmount(""); setNotes("");
+      setAmount(""); setNotes(""); setCategoryId("");
       onClose();
     } catch { toast.error("Gagal mencatat pembayaran"); }
     finally { setLoading(false); }
@@ -172,6 +182,19 @@ export function DebtPaymentModal({ debt, open, onClose }: Props) {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Kategori budget (opsional) — kalau dipilih dan ada budget bulan ini
+              dengan kategori yang sama, "Realisasi"-nya bakal ikut nambah. */}
+          <div>
+            <label className="block text-xs text-text-secondary mb-1.5">
+              Kategori Budget <span className="text-accent">(opsional)</span>
+            </label>
+            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}
+              className="w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors">
+              <option value="">Gak usah dihitung ke budget</option>
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
           </div>
 
           {/* Notes */}
