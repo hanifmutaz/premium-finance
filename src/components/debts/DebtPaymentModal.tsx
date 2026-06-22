@@ -4,8 +4,8 @@ import { useState, useEffect } from "react";
 import { X, Loader2, CreditCard, Calendar, Repeat } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency, formatDate } from "@/utils";
-import { addTransaction, getCategories } from "@/lib/db";
-import type { Debt } from "@/types";
+import { addTransaction, getCategories, getAccounts } from "@/lib/db";
+import type { Debt, AccountWithBalance } from "@/types";
 
 interface Props { debt: Debt | null; open: boolean; onClose: () => void; }
 
@@ -15,6 +15,8 @@ export function DebtPaymentModal({ debt, open, onClose }: Props) {
   const [notes, setNotes] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [accountId, setAccountId] = useState("");
+  const [accounts, setAccounts] = useState<AccountWithBalance[]>([]);
 
   // Pre-fill with installment amount if this is a scheduled installment debt
   useEffect(() => {
@@ -26,12 +28,18 @@ export function DebtPaymentModal({ debt, open, onClose }: Props) {
     }
     setNotes("");
     setCategoryId("");
+    setAccountId("");
   }, [open, debt]);
 
   // Kategori opsional — kalau dipilih (misal "Cicilan"), pembayaran ini akan
   // ikut nambah "Realisasi" di Budget bulan ini kalau ada kategori yang cocok.
   useEffect(() => {
-    if (open) getCategories("expense").then(setCategories).catch(() => {});
+    if (open) getCategories("expense").then(setCategories).catch(() => { });
+  }, [open]);
+
+  // Akun opsional — kalau dipilih, saldo akun itu otomatis kepotong sejumlah pembayaran.
+  useEffect(() => {
+    if (open) getAccounts().then(setAccounts).catch(() => { });
   }, [open]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -54,6 +62,7 @@ export function DebtPaymentModal({ debt, open, onClose }: Props) {
         name: `Bayar Utang: ${debt.name}`,
         description: notes || installmentNum || undefined,
         category_id: categoryId || undefined,
+        account_id: accountId || undefined,
         amount: val,
         date: new Date().toISOString().split("T")[0],
         payment_method: "transfer",
@@ -61,7 +70,7 @@ export function DebtPaymentModal({ debt, open, onClose }: Props) {
         debt_id: debt.id,
       });
       toast.success(`Pembayaran ${formatCurrency(val)} berhasil dicatat`);
-      setAmount(""); setNotes(""); setCategoryId("");
+      setAmount(""); setNotes(""); setCategoryId(""); setAccountId("");
       onClose();
     } catch { toast.error("Gagal mencatat pembayaran"); }
     finally { setLoading(false); }
@@ -182,6 +191,18 @@ export function DebtPaymentModal({ debt, open, onClose }: Props) {
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* Akun (opsional) — saldo akun ini bakal otomatis kepotong sejumlah pembayaran. */}
+          <div>
+            <label className="block text-xs text-text-secondary mb-1.5">
+              Bayar dari Akun <span className="text-accent">(opsional)</span>
+            </label>
+            <select value={accountId} onChange={(e) => setAccountId(e.target.value)}
+              className="w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors">
+              <option value="">Gak usah dipotong dari akun manapun</option>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} — {formatCurrency(a.balance, true)}</option>)}
+            </select>
           </div>
 
           {/* Kategori budget (opsional) — kalau dipilih dan ada budget bulan ini

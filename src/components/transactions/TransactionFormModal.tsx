@@ -4,8 +4,8 @@ import { useState, useEffect } from "react";
 import { X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/utils";
-import { addTransaction, updateTransaction, getCategories } from "@/lib/db";
-import type { Transaction, TransactionType, PaymentMethod } from "@/types";
+import { addTransaction, updateTransaction, getCategories, getAccounts } from "@/lib/db";
+import type { Transaction, TransactionType, PaymentMethod, AccountWithBalance } from "@/types";
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "transfer", label: "Transfer Bank" },
@@ -24,7 +24,7 @@ interface Props {
 
 function emptyForm() {
   return {
-    name: "", description: "", category_id: "", amount: "",
+    name: "", description: "", category_id: "", amount: "", account_id: "",
     date: new Date().toISOString().split("T")[0],
     payment_method: "transfer" as PaymentMethod,
   };
@@ -35,6 +35,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
   const [loading, setLoading] = useState(false);
   const [type, setType] = useState<TransactionType>("expense");
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [accounts, setAccounts] = useState<AccountWithBalance[]>([]);
   const [form, setForm] = useState(emptyForm());
 
   useEffect(() => {
@@ -46,6 +47,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
         description: editData.description ?? "",
         category_id: editData.category_id ?? "",
         amount: String(editData.amount),
+        account_id: editData.account_id ?? "",
         date: editData.date,
         payment_method: editData.payment_method,
       });
@@ -54,6 +56,10 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
       setForm(emptyForm());
     }
   }, [open, editData]);
+
+  useEffect(() => {
+    if (open) getAccounts().then(setAccounts).catch(() => { });
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -75,6 +81,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
           description: form.description || undefined,
           category_id: form.category_id || undefined,
           amount: parseFloat(form.amount),
+          account_id: type !== "transfer" ? (form.account_id || undefined) : undefined,
           date: form.date,
           payment_method: form.payment_method,
         });
@@ -86,6 +93,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
           description: form.description || undefined,
           category_id: form.category_id || undefined,
           amount: parseFloat(form.amount),
+          account_id: type !== "transfer" ? (form.account_id || undefined) : undefined,
           date: form.date,
           payment_method: form.payment_method,
           status: "completed",
@@ -163,6 +171,21 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
               {PAYMENT_METHODS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}
             </select>
           </div>
+
+          {type === "transfer" ? (
+            <p className="text-xs text-text-secondary bg-surface rounded-md px-3 py-2.5">
+              Buat transfer antar akun, pakai tombol &quot;Transfer&quot; di halaman Akun biar saldo dua akunnya ke-update otomatis.
+            </p>
+          ) : (
+            <div>
+              <label className="block text-xs text-text-secondary mb-1.5">Akun <span className="text-accent">(opsional)</span></label>
+              <select value={form.account_id} onChange={(e) => setForm({ ...form, account_id: e.target.value })}
+                className="w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors">
+                <option value="">Gak usah dihitung ke akun</option>
+                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+          )}
 
           <div>
             <label className="block text-xs text-text-secondary mb-1.5">Keterangan (opsional)</label>

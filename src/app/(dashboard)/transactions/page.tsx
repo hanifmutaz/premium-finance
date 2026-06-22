@@ -56,7 +56,7 @@ export default function TransactionsPage() {
 
   const totals = useMemo(() => ({
     income: filtered.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0),
-    expense: filtered.filter((t) => t.type !== "income").reduce((s, t) => s + t.amount, 0),
+    expense: filtered.filter((t) => t.type !== "income" && t.type !== "transfer").reduce((s, t) => s + t.amount, 0),
   }), [filtered]);
 
   async function handleDelete(id: string) {

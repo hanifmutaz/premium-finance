@@ -39,8 +39,28 @@ export interface Transaction {
   status: TransactionStatus;
   attachment_url?: string;
   debt_id?: string;
+  account_id?: string;
+  to_account_id?: string;
+  account?: Account;
+  to_account?: Account;
   created_at: string;
   updated_at: string;
+}
+
+// ─── Account (Sumber Dana) ──────────────────────────────────────────────────
+export type AccountType = "bank" | "ewallet" | "cash" | "other";
+export interface Account {
+  id: string;
+  user_id: string;
+  name: string;
+  type: AccountType;
+  initial_balance: number;
+  color?: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface AccountWithBalance extends Account {
+  balance: number;
 }
 
 // ─── Debt ─────────────────────────────────────────────────────────────────────

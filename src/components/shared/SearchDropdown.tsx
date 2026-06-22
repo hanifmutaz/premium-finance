@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Receipt, Wallet, Target, ShoppingBag, HandCoins, Loader2 } from "lucide-react";
+import { Receipt, Wallet, Target, ShoppingBag, HandCoins, Landmark, Loader2 } from "lucide-react";
 import { cn } from "@/utils";
 import type { SearchResult } from "@/lib/db";
 
@@ -12,6 +12,7 @@ const iconMap = {
   goal: Target,
   wishlist: ShoppingBag,
   receivable: HandCoins,
+  account: Landmark,
 };
 
 interface Props {

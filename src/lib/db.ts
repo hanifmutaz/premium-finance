@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { Transaction, Debt, Goal, Wishlist, Receivable, Notification, Category } from "@/types";
+import type { Transaction, Debt, Goal, Wishlist, Receivable, Notification, Category, Account, AccountType, AccountWithBalance } from "@/types";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 async function getSupabaseUser() {
@@ -85,6 +85,94 @@ export async function addTransaction(tx: Omit<Transaction, "id" | "user_id" | "c
     await syncBudgetActual(userId, data.category.name, tx.amount, tx.date);
   }
 
+  return data as Transaction;
+}
+
+// ─── Accounts (Sumber Dana) ─────────────────────────────────────────────────
+export async function getAccounts(): Promise<AccountWithBalance[]> {
+  const { supabase, userId } = await getSupabaseUser();
+
+  const [{ data: accounts, error: accError }, { data: txs, error: txError }] = await Promise.all([
+    supabase.from("accounts").select("*").eq("user_id", userId).order("created_at"),
+    supabase.from("transactions").select("type, amount, account_id, to_account_id").eq("user_id", userId),
+  ]);
+  if (accError) throw accError;
+  if (txError) throw txError;
+
+  // Saldo per akun = saldo_awal + semua transaksi yang nyentuh akun ini.
+  // "transfer" itu khusus: ngurangin akun asal (account_id), nambahin akun
+  // tujuan (to_account_id). Tipe lain (income/expense/debt_payment/saving)
+  // cuma nyentuh satu akun (account_id) — income nambah, sisanya ngurangin.
+  return (accounts ?? []).map((acc) => {
+    let balance = Number(acc.initial_balance);
+    (txs ?? []).forEach((t) => {
+      const amt = Number(t.amount);
+      if (t.type === "transfer") {
+        if (t.account_id === acc.id) balance -= amt;
+        if (t.to_account_id === acc.id) balance += amt;
+      } else if (t.account_id === acc.id) {
+        balance += t.type === "income" ? amt : -amt;
+      }
+    });
+    return { ...acc, balance } as AccountWithBalance;
+  });
+}
+
+export async function addAccount(account: { name: string; type: AccountType; initial_balance: number; color?: string }) {
+  const { supabase, userId } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("accounts")
+    .insert({ ...account, user_id: userId })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Account;
+}
+
+export async function updateAccount(id: string, account: { name?: string; type?: AccountType; initial_balance?: number; color?: string }) {
+  const { supabase } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("accounts")
+    .update({ ...account, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Account;
+}
+
+export async function deleteAccount(id: string) {
+  const { supabase } = await getSupabaseUser();
+  // Transaksi lama yang masih nempel ke akun ini TIDAK ikut terhapus —
+  // cuma jadi "tanpa akun" (FK on delete set null).
+  const { error } = await supabase.from("accounts").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function transferBetweenAccounts(params: {
+  from_account_id: string; to_account_id: string; amount: number; date: string; notes?: string;
+}) {
+  const { supabase, userId } = await getSupabaseUser();
+  if (params.from_account_id === params.to_account_id) {
+    throw new Error("Akun asal dan tujuan gak boleh sama");
+  }
+  const { data, error } = await supabase
+    .from("transactions")
+    .insert({
+      user_id: userId,
+      type: "transfer",
+      name: "Transfer Antar Akun",
+      description: params.notes || undefined,
+      amount: params.amount,
+      date: params.date,
+      payment_method: "transfer",
+      status: "completed",
+      account_id: params.from_account_id,
+      to_account_id: params.to_account_id,
+    })
+    .select()
+    .single();
+  if (error) throw error;
   return data as Transaction;
 }
 
@@ -522,12 +610,12 @@ export async function getDashboardStats() {
 
   const monthly_income = transactions.filter((t) => t.type === "income")
     .reduce((s, t) => s + Number(t.amount), 0);
-  const monthly_expense = transactions.filter((t) => t.type !== "income")
+  const monthly_expense = transactions.filter((t) => t.type !== "income" && t.type !== "transfer")
     .reduce((s, t) => s + Number(t.amount), 0);
 
   const prev_monthly_income = prevTransactions.filter((t) => t.type === "income")
     .reduce((s, t) => s + Number(t.amount), 0);
-  const prev_monthly_expense = prevTransactions.filter((t) => t.type !== "income")
+  const prev_monthly_expense = prevTransactions.filter((t) => t.type !== "income" && t.type !== "transfer")
     .reduce((s, t) => s + Number(t.amount), 0);
 
   // Real percentage change vs last month (null if no prior data to compare against)
@@ -584,7 +672,7 @@ export async function getMonthlyChartData() {
       .eq("user_id", userId).gte("date", firstDay).lte("date", lastDay);
 
     const income = (data ?? []).filter((t) => t.type === "income").reduce((s, t) => s + Number(t.amount), 0);
-    const expense = (data ?? []).filter((t) => t.type !== "income").reduce((s, t) => s + Number(t.amount), 0);
+    const expense = (data ?? []).filter((t) => t.type !== "income" && t.type !== "transfer").reduce((s, t) => s + Number(t.amount), 0);
     months.push({ month: monthName, income, expense, balance: income - expense });
   }
   return months;
@@ -1102,7 +1190,7 @@ export async function getCategoryBreakdown(): Promise<{ name: string; value: num
 // ─── Global Search ──────────────────────────────────────────────────────────
 export interface SearchResult {
   id: string;
-  type: "debt" | "transaction" | "goal" | "wishlist" | "receivable";
+  type: "debt" | "transaction" | "goal" | "wishlist" | "receivable" | "account";
   title: string;
   subtitle: string;
   href: string;
@@ -1115,12 +1203,13 @@ export async function globalSearch(query: string): Promise<SearchResult[]> {
   const { supabase, userId } = await getSupabaseUser();
   const like = `%${q}%`;
 
-  const [debts, transactions, goals, wishlist, receivables] = await Promise.all([
+  const [debts, transactions, goals, wishlist, receivables, accounts] = await Promise.all([
     supabase.from("debts").select("id, name, lender").eq("user_id", userId).ilike("name", like).limit(5),
     supabase.from("transactions").select("id, name, amount").eq("user_id", userId).ilike("name", like).limit(5),
     supabase.from("goals").select("id, name, target_amount").eq("user_id", userId).ilike("name", like).limit(5),
-    supabase.from("wishlist").select("id, name, price").eq("user_id", userId).ilike("name", like).limit(5),
+    supabase.from("wishlists").select("id, name, price").eq("user_id", userId).ilike("name", like).limit(5),
     supabase.from("receivables").select("id, name, borrower, total_amount").eq("user_id", userId).ilike("name", like).limit(5),
+    supabase.from("accounts").select("id, name, type, initial_balance").eq("user_id", userId).ilike("name", like).limit(5),
   ]);
 
   const results: SearchResult[] = [];
@@ -1148,6 +1237,9 @@ export async function globalSearch(query: string): Promise<SearchResult[]> {
   );
   (receivables.data ?? []).forEach((r) =>
     results.push({ id: r.id, type: "receivable", title: r.name, subtitle: `Piutang • ${r.borrower}`, href: "/receivables" })
+  );
+  (accounts.data ?? []).forEach((a) =>
+    results.push({ id: a.id, type: "account", title: a.name, subtitle: `Akun • ${a.type}`, href: "/accounts" })
   );
 
   return results;

@@ -15,6 +15,7 @@ import type { SearchResult } from "@/lib/db";
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "Financial Overview",
+  "/accounts": "Sumber Dana",
   "/transactions": "Transaksi",
   "/debts": "Manajemen Utang",
   "/goals": "Target Pelunasan",
