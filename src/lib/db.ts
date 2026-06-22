@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-import type { Transaction, Debt, Goal, Wishlist, Receivable, Notification } from "@/types";
+import type { Transaction, Debt, Goal, Wishlist, Receivable, Notification, Category } from "@/types";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 async function getSupabaseUser() {
@@ -461,6 +461,37 @@ export async function getCategories(type?: "income" | "expense") {
   const { data, error } = await query.order("name");
   if (error) throw error;
   return data ?? [];
+}
+
+export async function addCategory(category: { name: string; type: "income" | "expense"; color?: string }) {
+  const { supabase, userId } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("categories")
+    .insert({ ...category, user_id: userId })
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Category;
+}
+
+export async function updateCategory(id: string, category: { name: string; color?: string }) {
+  const { supabase } = await getSupabaseUser();
+  const { data, error } = await supabase
+    .from("categories")
+    .update(category)
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data as Category;
+}
+
+export async function deleteCategory(id: string) {
+  const { supabase } = await getSupabaseUser();
+  // Transaksi yang masih pakai kategori ini akan otomatis jadi "Lainnya" (NULL)
+  // begitu kategorinya dihapus — bukan ikut terhapus.
+  const { error } = await supabase.from("categories").delete().eq("id", id);
+  if (error) throw error;
 }
 
 // ─── Dashboard stats ──────────────────────────────────────────────────────────

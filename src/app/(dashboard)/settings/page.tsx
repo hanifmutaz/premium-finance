@@ -2,14 +2,16 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
-import { User, Bell, Shield, Database, ChevronRight, Save, Loader2, Smartphone, BellRing, BellOff } from "lucide-react";
+import { User, Bell, Shield, Database, Tag, ChevronRight, Save, Loader2, Smartphone, BellRing, BellOff } from "lucide-react";
 import { cn, getInitials } from "@/utils";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 import { isPushSupported, getPushPermissionStatus, subscribeToPush, unsubscribeFromPush, isSubscribed } from "@/lib/push-notifications";
+import { CategoryManager } from "@/components/settings/CategoryManager";
 
 const settingsSections = [
   { id: "profile", label: "Profil", icon: User },
+  { id: "categories", label: "Kategori", icon: Tag },
   { id: "notifications", label: "Notifikasi", icon: Bell },
   { id: "security", label: "Keamanan", icon: Shield },
   { id: "data", label: "Data & Export", icon: Database },
@@ -137,6 +139,16 @@ export default function SettingsPage() {
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                 {saving ? "Menyimpan..." : "Simpan Perubahan"}
               </button>
+            </>
+          )}
+
+          {activeSection === "categories" && (
+            <>
+              <div>
+                <h2 className="text-base font-semibold text-text-primary mb-1">Kelola Kategori</h2>
+                <p className="text-sm text-text-secondary">Tambah, ubah, atau hapus kategori transaksi kamu</p>
+              </div>
+              <CategoryManager />
             </>
           )}
 

@@ -1,0 +1,253 @@
+diff --git a/src/app/(dashboard)/settings/page.tsx b/src/app/(dashboard)/settings/page.tsx
+index 58fa03a..82ec1c4 100644
+--- a/src/app/(dashboard)/settings/page.tsx
++++ b/src/app/(dashboard)/settings/page.tsx
+@@ -2,14 +2,16 @@
+ export const dynamic = "force-dynamic";
+ 
+ import { useState, useEffect } from "react";
+-import { User, Bell, Shield, Database, ChevronRight, Save, Loader2, Smartphone, BellRing, BellOff } from "lucide-react";
++import { User, Bell, Shield, Database, Tag, ChevronRight, Save, Loader2, Smartphone, BellRing, BellOff } from "lucide-react";
+ import { cn, getInitials } from "@/utils";
+ import { createClient } from "@/lib/supabase/client";
+ import { toast } from "sonner";
+ import { isPushSupported, getPushPermissionStatus, subscribeToPush, unsubscribeFromPush, isSubscribed } from "@/lib/push-notifications";
++import { CategoryManager } from "@/components/settings/CategoryManager";
+ 
+ const settingsSections = [
+   { id: "profile", label: "Profil", icon: User },
++  { id: "categories", label: "Kategori", icon: Tag },
+   { id: "notifications", label: "Notifikasi", icon: Bell },
+   { id: "security", label: "Keamanan", icon: Shield },
+   { id: "data", label: "Data & Export", icon: Database },
+@@ -140,6 +142,16 @@ export default function SettingsPage() {
+             </>
+           )}
+ 
++          {activeSection === "categories" && (
++            <>
++              <div>
++                <h2 className="text-base font-semibold text-text-primary mb-1">Kelola Kategori</h2>
++                <p className="text-sm text-text-secondary">Tambah, ubah, atau hapus kategori transaksi kamu</p>
++              </div>
++              <CategoryManager />
++            </>
++          )}
++
+           {activeSection === "notifications" && (
+             <>
+               <div>
+diff --git a/src/components/settings/CategoryManager.tsx b/src/components/settings/CategoryManager.tsx
+new file mode 100644
+index 0000000..171d553
+--- /dev/null
++++ b/src/components/settings/CategoryManager.tsx
+@@ -0,0 +1,159 @@
++"use client";
++
++import { useState, useEffect } from "react";
++import { Plus, Pencil, Trash2, Check, X, Loader2 } from "lucide-react";
++import { toast } from "sonner";
++import { cn } from "@/utils";
++import { getCategories, addCategory, updateCategory, deleteCategory } from "@/lib/db";
++import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
++import type { Category } from "@/types";
++
++const DEFAULT_COLORS = ["#64748B", "#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#A855F7", "#EC4899", "#14B8A6"];
++
++function CategorySection({ type, label }: { type: "income" | "expense"; label: string }) {
++  const [categories, setCategories] = useState<Category[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [adding, setAdding] = useState(false);
++  const [newName, setNewName] = useState("");
++  const [editingId, setEditingId] = useState<string | null>(null);
++  const [editName, setEditName] = useState("");
++  const [deleteTarget, setDeleteTarget] = useState<Category | null>(null);
++  const [busy, setBusy] = useState(false);
++
++  async function load() {
++    setLoading(true);
++    try { setCategories((await getCategories(type)) as Category[]); }
++    catch { toast.error("Gagal memuat kategori"); }
++    finally { setLoading(false); }
++  }
++
++  useEffect(() => { load(); }, [type]);
++
++  async function handleAdd() {
++    if (!newName.trim()) return;
++    setBusy(true);
++    try {
++      await addCategory({
++        name: newName.trim(), type,
++        color: DEFAULT_COLORS[categories.length % DEFAULT_COLORS.length],
++      });
++      setNewName(""); setAdding(false);
++      toast.success("Kategori ditambahkan");
++      load();
++    } catch { toast.error("Gagal menambah kategori"); }
++    finally { setBusy(false); }
++  }
++
++  async function handleRename(cat: Category) {
++    if (!editName.trim()) return;
++    setBusy(true);
++    try {
++      await updateCategory(cat.id, { name: editName.trim(), color: cat.color });
++      setEditingId(null);
++      toast.success("Kategori diperbarui");
++      load();
++    } catch { toast.error("Gagal memperbarui kategori"); }
++    finally { setBusy(false); }
++  }
++
++  async function handleDelete(cat: Category) {
++    try {
++      await deleteCategory(cat.id);
++      toast.success("Kategori dihapus");
++      load();
++    } catch {
++      toast.error("Gagal menghapus — coba lagi");
++    }
++  }
++
++  return (
++    <div>
++      <h3 className="text-sm font-semibold text-text-primary mb-2.5">{label}</h3>
++      {loading ? (
++        <div className="py-6 text-center text-text-secondary text-xs">Memuat...</div>
++      ) : (
++        <div className="space-y-1.5">
++          {categories.map((cat) => (
++            <div key={cat.id} className="flex items-center gap-2.5 p-2.5 bg-surface rounded-md border border-border group">
++              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color || "#64748B" }} />
++              {editingId === cat.id ? (
++                <>
++                  <input
++                    autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
++                    onKeyDown={(e) => { if (e.key === "Enter") handleRename(cat); if (e.key === "Escape") setEditingId(null); }}
++                    className="flex-1 bg-input border border-border rounded px-2 py-1 text-sm text-text-primary focus:outline-none focus:border-accent"
++                  />
++                  <button onClick={() => handleRename(cat)} disabled={busy} className="text-success hover:text-success/80 shrink-0">
++                    <Check size={14} />
++                  </button>
++                  <button onClick={() => setEditingId(null)} className="text-text-secondary hover:text-danger shrink-0">
++                    <X size={14} />
++                  </button>
++                </>
++              ) : (
++                <>
++                  <span className="flex-1 text-sm text-text-primary">{cat.name}</span>
++                  <button
++                    onClick={() => { setEditingId(cat.id); setEditName(cat.name); }}
++                    className="text-text-secondary opacity-0 group-hover:opacity-100 hover:text-text-primary transition-opacity shrink-0"
++                  >
++                    <Pencil size={13} />
++                  </button>
++                  <button
++                    onClick={() => setDeleteTarget(cat)}
++                    className="text-text-secondary opacity-0 group-hover:opacity-100 hover:text-danger transition-opacity shrink-0"
++                  >
++                    <Trash2 size={13} />
++                  </button>
++                </>
++              )}
++            </div>
++          ))}
++
++          {adding ? (
++            <div className="flex items-center gap-2 p-2.5 bg-surface rounded-md border border-accent">
++              <input
++                autoFocus value={newName} onChange={(e) => setNewName(e.target.value)}
++                onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); if (e.key === "Escape") { setAdding(false); setNewName(""); } }}
++                placeholder="Nama kategori baru"
++                className="flex-1 bg-input border border-border rounded px-2 py-1 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent"
++              />
++              <button onClick={handleAdd} disabled={busy} className="text-success hover:text-success/80 shrink-0">
++                {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
++              </button>
++              <button onClick={() => { setAdding(false); setNewName(""); }} className="text-text-secondary hover:text-danger shrink-0">
++                <X size={14} />
++              </button>
++            </div>
++          ) : (
++            <button
++              onClick={() => setAdding(true)}
++              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-md border border-dashed border-border text-xs font-medium text-accent hover:border-accent hover:text-text-primary transition-colors"
++            >
++              <Plus size={13} /> Tambah Kategori {label}
++            </button>
++          )}
++        </div>
++      )}
++
++      <ConfirmDialog
++        open={!!deleteTarget}
++        title="Hapus kategori?"
++        description={`"${deleteTarget?.name}" akan dihapus. Transaksi yang masih pakai kategori ini bakal jadi tanpa kategori (bukan ikut terhapus).`}
++        confirmLabel="Hapus"
++        confirmVariant="danger"
++        onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
++        onClose={() => setDeleteTarget(null)}
++      />
++    </div>
++  );
++}
++
++export function CategoryManager() {
++  return (
++    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
++      <CategorySection type="income" label="Pemasukan" />
++      <CategorySection type="expense" label="Pengeluaran" />
++    </div>
++  );
++}
+diff --git a/src/lib/db.ts b/src/lib/db.ts
+index 5fbedb3..fd04340 100644
+--- a/src/lib/db.ts
++++ b/src/lib/db.ts
+@@ -1,5 +1,5 @@
+ import { createClient } from "@/lib/supabase/client";
+-import type { Transaction, Debt, Goal, Wishlist, Receivable, Notification } from "@/types";
++import type { Transaction, Debt, Goal, Wishlist, Receivable, Notification, Category } from "@/types";
+ 
+ // ─── Auth helper ──────────────────────────────────────────────────────────────
+ async function getSupabaseUser() {
+@@ -463,6 +463,37 @@ export async function getCategories(type?: "income" | "expense") {
+   return data ?? [];
+ }
+ 
++export async function addCategory(category: { name: string; type: "income" | "expense"; color?: string }) {
++  const { supabase, userId } = await getSupabaseUser();
++  const { data, error } = await supabase
++    .from("categories")
++    .insert({ ...category, user_id: userId })
++    .select()
++    .single();
++  if (error) throw error;
++  return data as Category;
++}
++
++export async function updateCategory(id: string, category: { name: string; color?: string }) {
++  const { supabase } = await getSupabaseUser();
++  const { data, error } = await supabase
++    .from("categories")
++    .update(category)
++    .eq("id", id)
++    .select()
++    .single();
++  if (error) throw error;
++  return data as Category;
++}
++
++export async function deleteCategory(id: string) {
++  const { supabase } = await getSupabaseUser();
++  // Transaksi yang masih pakai kategori ini akan otomatis jadi "Lainnya" (NULL)
++  // begitu kategorinya dihapus — bukan ikut terhapus.
++  const { error } = await supabase.from("categories").delete().eq("id", id);
++  if (error) throw error;
++}
++
+ // ─── Dashboard stats ──────────────────────────────────────────────────────────
+ export async function getDashboardStats() {
+   const { supabase, userId } = await getSupabaseUser();
