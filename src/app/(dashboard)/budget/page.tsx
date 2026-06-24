@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
 import {
   Plus, Calendar, CalendarDays, TrendingUp, TrendingDown,
-  Target, ChevronDown, ChevronUp, Pencil, Trash2, AlertCircle, CheckCircle2,
+  Target, ChevronDown, ChevronUp, Pencil, Trash2, AlertCircle, CheckCircle2, Link2,
 } from "lucide-react";
 import { formatCurrency, calculateProgress, cn } from "@/utils";
 import { ProgressBar } from "@/components/shared/ProgressBar";
@@ -40,6 +40,9 @@ export default function BudgetPage() {
   useEffect(() => { load(); }, []);
 
   const filtered = budgets.filter((b) => b.period === tab);
+
+  // Map budget ID -> name untuk lookup parent
+  const budgetNameMap = Object.fromEntries(budgets.map((b) => [b.id, b.name]));
 
   function openAdd() {
     setEditData(null);
@@ -159,6 +162,15 @@ export default function BudgetPage() {
                           </span>
                         )}
                       </div>
+                      {budget.parent_budget_id && budget.weekly_source_category && (
+                        <div className="flex items-center gap-1 mt-1">
+                          <Link2 size={9} className="text-accent shrink-0" />
+                          <p className="text-[10px] text-accent">
+                            Dari <span className="font-medium">{budgetNameMap[budget.parent_budget_id] ?? "Budget Bulanan"}</span>
+                            {" · "}kat. <span className="font-medium">{budget.weekly_source_category}</span>
+                          </p>
+                        </div>
+                      )}
                       <p className="text-xs text-text-secondary mt-0.5">
                         Pemasukan: {formatCurrency(totalIncome, true)}
                       </p>

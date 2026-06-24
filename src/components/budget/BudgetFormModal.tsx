@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Plus, Trash2, Loader2 } from "lucide-react";
+import { X, Plus, Trash2, Loader2, Link2, AlertCircle } from "lucide-react";
 import { cn } from "@/utils";
-import { addBudget, updateBudget } from "@/lib/db";
+import { addBudget, updateBudget, getBudgets } from "@/lib/db";
 import { toast } from "sonner";
 import type { Budget, BudgetPeriod } from "@/types";
 
@@ -49,12 +49,50 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState<CatRow[]>(() => presetCats(defaultPeriod));
 
+  // Integrasi mingguan
+  const [monthlyBudgets, setMonthlyBudgets] = useState<Budget[]>([]);
+  const [parentBudgetId, setParentBudgetId] = useState<string>("");
+  const [weeklySourceCategory, setWeeklySourceCategory] = useState<string>("");
+  const [loadingParents, setLoadingParents] = useState(false);
+
+  // Load budget bulanan yang bisa jadi parent
+  useEffect(() => {
+    if (period === "weekly" && !isEdit) {
+      setLoadingParents(true);
+      getBudgets()
+        .then((data) => {
+          const monthly = (data as Budget[]).filter((b) => b.period === "monthly");
+          setMonthlyBudgets(monthly);
+        })
+        .catch(() => { })
+        .finally(() => setLoadingParents(false));
+    }
+  }, [period, isEdit]);
+
+  // Kalau parent budget dipilih dan ada kategori yang cocok, auto-isi total income
+  const selectedParent = monthlyBudgets.find((b) => b.id === parentBudgetId);
+  const parentCategories = selectedParent?.categories ?? [];
+
+  useEffect(() => {
+    if (!selectedParent || !weeklySourceCategory) return;
+    const cat = parentCategories.find(
+      (c) => c.name.toLowerCase() === weeklySourceCategory.toLowerCase()
+    );
+    if (cat) {
+      // Sisa alokasi di kategori ini (planned - actual) dibagi estimasi sisa minggu
+      const remaining = Math.max(0, Number(cat.planned_amount) - Number(cat.actual_amount));
+      setTotalIncome(String(remaining));
+    }
+  }, [weeklySourceCategory, selectedParent]);
+
   useEffect(() => {
     if (editData) {
       setPeriod(editData.period);
       setName(editData.name);
       setTotalIncome(String(editData.total_income));
       setNotes(editData.notes ?? "");
+      setParentBudgetId(editData.parent_budget_id ?? "");
+      setWeeklySourceCategory(editData.weekly_source_category ?? "");
       setCategories(
         editData.categories.map((c, i) => ({
           id: c.id,
@@ -72,6 +110,14 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
   const income = parseFloat(totalIncome) || 0;
   const remaining = income - totalPlanned;
 
+  // Hitung persen pemakaian di parent category (buat info)
+  const linkedCatData = weeklySourceCategory && selectedParent
+    ? parentCategories.find((c) => c.name.toLowerCase() === weeklySourceCategory.toLowerCase())
+    : null;
+  const linkedCatPercent = linkedCatData && Number(linkedCatData.planned_amount) > 0
+    ? (Number(linkedCatData.actual_amount) / Number(linkedCatData.planned_amount)) * 100
+    : 0;
+
   function addCategory() {
     setCategories((prev) => [
       ...prev,
@@ -88,9 +134,11 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
   }
 
   function handlePeriodChange(p: BudgetPeriod) {
-    if (isEdit) return; // period locked once created
+    if (isEdit) return;
     setPeriod(p);
     setCategories(presetCats(p));
+    setParentBudgetId("");
+    setWeeklySourceCategory("");
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -132,6 +180,8 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
           week: period === "weekly" ? Math.ceil(now.getDate() / 7) : undefined,
           total_income: income,
           notes: notes || undefined,
+          parent_budget_id: period === "weekly" && parentBudgetId ? parentBudgetId : null,
+          weekly_source_category: period === "weekly" && weeklySourceCategory ? weeklySourceCategory : null,
           categories: cats.map((c) => ({
             name: c.name,
             planned_amount: parseFloat(c.planned_amount),
@@ -186,6 +236,103 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
             </div>
           </div>
 
+          {/* Integrasi Mingguan — hanya muncul saat period=weekly dan bukan edit */}
+          {period === "weekly" && !isEdit && (
+            <div className="bg-surface border border-border rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Link2 size={13} className="text-accent shrink-0" />
+                <p className="text-xs font-medium text-text-primary">Hubungkan ke Budget Bulanan (opsional)</p>
+              </div>
+              <p className="text-[11px] text-text-secondary">
+                Pilih budget bulanan dan kategori yang dikhususkan untuk mingguan. Nominal akan otomatis diisi dari sisa alokasi kategori tersebut.
+              </p>
+
+              {loadingParents ? (
+                <p className="text-xs text-text-secondary">Memuat budget bulanan...</p>
+              ) : monthlyBudgets.length === 0 ? (
+                <p className="text-xs text-text-secondary italic">Belum ada budget bulanan. Buat dulu baru bisa dihubungkan.</p>
+              ) : (
+                <>
+                  {/* Pilih Budget Bulanan */}
+                  <div>
+                    <label className={labelClass}>Budget Bulanan</label>
+                    <select
+                      className={cn(inputClass, "cursor-pointer")}
+                      value={parentBudgetId}
+                      onChange={(e) => {
+                        setParentBudgetId(e.target.value);
+                        setWeeklySourceCategory("");
+                      }}
+                    >
+                      <option value="">— Tidak dihubungkan —</option>
+                      {monthlyBudgets.map((b) => (
+                        <option key={b.id} value={b.id}>{b.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Pilih Kategori Sumber */}
+                  {parentBudgetId && (
+                    <div>
+                      <label className={labelClass}>Kategori yang dikhususkan untuk mingguan</label>
+                      <select
+                        className={cn(inputClass, "cursor-pointer")}
+                        value={weeklySourceCategory}
+                        onChange={(e) => setWeeklySourceCategory(e.target.value)}
+                      >
+                        <option value="">— Pilih kategori —</option>
+                        {parentCategories.map((c) => (
+                          <option key={c.id} value={c.name}>{c.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Info Alokasi Kategori */}
+                  {linkedCatData && (
+                    <div className={cn(
+                      "rounded-md p-3 text-xs space-y-1",
+                      linkedCatPercent >= 100 ? "bg-danger/10 border border-danger/20" : "bg-success/10 border border-success/20"
+                    )}>
+                      <div className="flex items-center gap-1.5">
+                        <AlertCircle size={11} className={linkedCatPercent >= 100 ? "text-danger" : "text-success"} />
+                        <span className="font-medium text-text-primary">
+                          {linkedCatData.name} di budget bulanan
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-text-secondary">
+                        <span>Direncanakan:</span>
+                        <span className="font-medium text-text-primary">
+                          {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(Number(linkedCatData.planned_amount))}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-text-secondary">
+                        <span>Terpakai:</span>
+                        <span className={cn("font-medium", linkedCatPercent >= 100 ? "text-danger" : "text-text-primary")}>
+                          {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(Number(linkedCatData.actual_amount))}
+                          {" "}({linkedCatPercent.toFixed(0)}%)
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-text-secondary">
+                        <span>Sisa tersedia:</span>
+                        <span className={cn("font-semibold", linkedCatPercent >= 100 ? "text-danger" : "text-success")}>
+                          {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(
+                            Math.max(0, Number(linkedCatData.planned_amount) - Number(linkedCatData.actual_amount))
+                          )}
+                        </span>
+                      </div>
+                      {linkedCatPercent >= 80 && (
+                        <p className="text-[10px] text-warning font-medium pt-0.5">
+                          ⚠️ Alokasi bulanan sudah hampir habis!
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           {/* Name */}
           <div>
             <label className={labelClass}>Nama Budget (opsional)</label>
@@ -195,7 +342,12 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
 
           {/* Income */}
           <div>
-            <label className={labelClass}>Total Pemasukan (Rp)</label>
+            <label className={labelClass}>
+              Total Pemasukan (Rp)
+              {weeklySourceCategory && linkedCatData && (
+                <span className="text-accent ml-1">— dari sisa alokasi {weeklySourceCategory}</span>
+              )}
+            </label>
             <input className={inputClass} type="number" min="0" placeholder="cth: 12450000"
               value={totalIncome} onChange={(e) => setTotalIncome(e.target.value)} required />
           </div>

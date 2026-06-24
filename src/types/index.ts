@@ -276,6 +276,10 @@ export interface Budget {
   total_actual: number;
   categories: BudgetCategory[];
   notes?: string;
+  // Integrasi mingguan: ID budget bulanan yang jadi sumber alokasi
+  parent_budget_id?: string | null;
+  // Nama kategori di budget bulanan yang dikhususkan buat mingguan ini
+  weekly_source_category?: string | null;
   created_at: string;
   updated_at: string;
 }

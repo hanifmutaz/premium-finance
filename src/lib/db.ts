@@ -937,6 +937,8 @@ export async function getBudgets() {
 export async function addBudget(budget: {
   name: string; period: string; year: number; month?: number; week?: number;
   total_income: number; notes?: string;
+  parent_budget_id?: string | null;
+  weekly_source_category?: string | null;
   categories: { name: string; planned_amount: number; color?: string }[];
 }) {
   const { supabase, userId } = await getSupabaseUser();
