@@ -261,6 +261,10 @@ export interface BudgetCategory {
   planned_amount: number;
   actual_amount: number;
   color?: string;
+  // Mapping: ID kategori transaksi yang akan ditangkap oleh kategori budget ini
+  mapped_category_ids?: string[] | null;
+  // Filter tambahan: hanya transaksi yang namanya mengandung kata ini
+  keyword_filter?: string | null;
 }
 
 export interface Budget {

@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Plus, Trash2, Loader2, Link2, AlertCircle } from "lucide-react";
+import { X, Plus, Trash2, Loader2, Link2, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/utils";
-import { addBudget, updateBudget, getBudgets } from "@/lib/db";
+import { addBudget, updateBudget, getBudgets, getCategories } from "@/lib/db";
 import { toast } from "sonner";
 import type { Budget, BudgetPeriod } from "@/types";
 
@@ -25,12 +25,17 @@ const MONTHS = [
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
 
+interface TxCategory { id: string; name: string; }
+
 interface CatRow {
   id?: string;
   name: string;
   planned_amount: string;
   actual_amount: number;
   color: string;
+  mapped_category_ids: string[];
+  keyword_filter: string;
+  showMapping: boolean; // UI state, tidak disimpan ke DB
 }
 
 interface Props {
@@ -42,7 +47,11 @@ interface Props {
 
 function presetCats(period: BudgetPeriod): CatRow[] {
   return (period === "monthly" ? PRESET_CATEGORIES_MONTHLY : PRESET_CATEGORIES_WEEKLY)
-    .map((n, i) => ({ name: n, planned_amount: "", actual_amount: 0, color: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }));
+    .map((n, i) => ({
+      name: n, planned_amount: "", actual_amount: 0,
+      color: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
+      mapped_category_ids: [], keyword_filter: "", showMapping: false,
+    }));
 }
 
 export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: Props) {
@@ -55,10 +64,11 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState<CatRow[]>(() => presetCats(defaultPeriod));
-
-  // Pilihan bulan & tahun yang bisa diset manual
-  const [budgetMonth, setBudgetMonth] = useState(now.getMonth() + 1); // 1-12
+  const [budgetMonth, setBudgetMonth] = useState(now.getMonth() + 1);
   const [budgetYear, setBudgetYear] = useState(now.getFullYear());
+
+  // Kategori transaksi (untuk dropdown mapping)
+  const [txCategories, setTxCategories] = useState<TxCategory[]>([]);
 
   // Integrasi mingguan
   const [monthlyBudgets, setMonthlyBudgets] = useState<Budget[]>([]);
@@ -67,13 +77,14 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
   const [loadingParents, setLoadingParents] = useState(false);
 
   useEffect(() => {
+    getCategories("expense").then(setTxCategories).catch(() => { });
+  }, []);
+
+  useEffect(() => {
     if (period === "weekly" && !isEdit) {
       setLoadingParents(true);
       getBudgets()
-        .then((data) => {
-          const monthly = (data as Budget[]).filter((b) => b.period === "monthly");
-          setMonthlyBudgets(monthly);
-        })
+        .then((data) => setMonthlyBudgets((data as Budget[]).filter((b) => b.period === "monthly")))
         .catch(() => { })
         .finally(() => setLoadingParents(false));
     }
@@ -84,9 +95,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
 
   useEffect(() => {
     if (!selectedParent || !weeklySourceCategory) return;
-    const cat = parentCategories.find(
-      (c) => c.name.toLowerCase() === weeklySourceCategory.toLowerCase()
-    );
+    const cat = parentCategories.find((c) => c.name.toLowerCase() === weeklySourceCategory.toLowerCase());
     if (cat) {
       const remaining = Math.max(0, Number(cat.planned_amount) - Number(cat.actual_amount));
       setTotalIncome(String(remaining));
@@ -94,25 +103,25 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
   }, [weeklySourceCategory, selectedParent]);
 
   useEffect(() => {
-    if (editData) {
-      setPeriod(editData.period);
-      setName(editData.name);
-      setTotalIncome(String(editData.total_income));
-      setNotes(editData.notes ?? "");
-      setParentBudgetId(editData.parent_budget_id ?? "");
-      setWeeklySourceCategory(editData.weekly_source_category ?? "");
-      setBudgetMonth(editData.month ?? now.getMonth() + 1);
-      setBudgetYear(editData.year ?? now.getFullYear());
-      setCategories(
-        editData.categories.map((c, i) => ({
-          id: c.id,
-          name: c.name,
-          planned_amount: String(c.planned_amount),
-          actual_amount: Number(c.actual_amount) || 0,
-          color: c.color ?? CATEGORY_COLORS[i % CATEGORY_COLORS.length],
-        }))
-      );
-    }
+    if (!editData) return;
+    setPeriod(editData.period);
+    setName(editData.name);
+    setTotalIncome(String(editData.total_income));
+    setNotes(editData.notes ?? "");
+    setParentBudgetId(editData.parent_budget_id ?? "");
+    setWeeklySourceCategory(editData.weekly_source_category ?? "");
+    setBudgetMonth(editData.month ?? now.getMonth() + 1);
+    setBudgetYear(editData.year ?? now.getFullYear());
+    setCategories(editData.categories.map((c, i) => ({
+      id: c.id,
+      name: c.name,
+      planned_amount: String(c.planned_amount),
+      actual_amount: Number(c.actual_amount) || 0,
+      color: c.color ?? CATEGORY_COLORS[i % CATEGORY_COLORS.length],
+      mapped_category_ids: (c.mapped_category_ids as string[]) ?? [],
+      keyword_filter: c.keyword_filter ?? "",
+      showMapping: !!((c.mapped_category_ids as string[])?.length),
+    })));
   }, [editData]);
 
   const totalPlanned = categories.reduce((s, c) => s + (parseFloat(c.planned_amount) || 0), 0);
@@ -123,35 +132,50 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
     ? parentCategories.find((c) => c.name.toLowerCase() === weeklySourceCategory.toLowerCase())
     : null;
   const linkedCatPercent = linkedCatData && Number(linkedCatData.planned_amount) > 0
-    ? (Number(linkedCatData.actual_amount) / Number(linkedCatData.planned_amount)) * 100
-    : 0;
+    ? (Number(linkedCatData.actual_amount) / Number(linkedCatData.planned_amount)) * 100 : 0;
 
-  // Label periode yang dipilih untuk nama default
   const periodLabel = period === "monthly"
     ? `${MONTHS[budgetMonth - 1]} ${budgetYear}`
     : `Minggu ${Math.ceil(now.getDate() / 7)} ${MONTHS[budgetMonth - 1]} ${budgetYear}`;
 
   function addCategory() {
-    setCategories((prev) => [
-      ...prev,
-      { name: "", planned_amount: "", actual_amount: 0, color: CATEGORY_COLORS[prev.length % CATEGORY_COLORS.length] },
-    ]);
+    setCategories((prev) => [...prev, {
+      name: "", planned_amount: "", actual_amount: 0,
+      color: CATEGORY_COLORS[prev.length % CATEGORY_COLORS.length],
+      mapped_category_ids: [], keyword_filter: "", showMapping: false,
+    }]);
   }
 
   function removeCategory(idx: number) {
     setCategories((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  function updateCat(idx: number, field: "name" | "planned_amount" | "color", value: string) {
+  function updateCat<K extends keyof CatRow>(idx: number, field: K, value: CatRow[K]) {
     setCategories((prev) => prev.map((c, i) => i === idx ? { ...c, [field]: value } : c));
+  }
+
+  function toggleMapping(idx: number) {
+    setCategories((prev) => prev.map((c, i) => i === idx ? { ...c, showMapping: !c.showMapping } : c));
+  }
+
+  function toggleMappedCat(catIdx: number, txCatId: string) {
+    setCategories((prev) => prev.map((c, i) => {
+      if (i !== catIdx) return c;
+      const already = c.mapped_category_ids.includes(txCatId);
+      return {
+        ...c,
+        mapped_category_ids: already
+          ? c.mapped_category_ids.filter((id) => id !== txCatId)
+          : [...c.mapped_category_ids, txCatId],
+      };
+    }));
   }
 
   function handlePeriodChange(p: BudgetPeriod) {
     if (isEdit) return;
     setPeriod(p);
     setCategories(presetCats(p));
-    setParentBudgetId("");
-    setWeeklySourceCategory("");
+    setParentBudgetId(""); setWeeklySourceCategory("");
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -173,14 +197,15 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
             planned_amount: parseFloat(c.planned_amount),
             actual_amount: c.actual_amount,
             color: c.color,
+            mapped_category_ids: c.mapped_category_ids.length > 0 ? c.mapped_category_ids : null,
+            keyword_filter: c.keyword_filter || null,
           })),
         });
         toast.success("Budget berhasil diperbarui!");
       } else {
         const budgetName = name || `Budget ${period === "monthly" ? "Bulanan" : "Mingguan"} ${periodLabel}`;
         await addBudget({
-          name: budgetName,
-          period,
+          name: budgetName, period,
           year: budgetYear,
           month: period === "monthly" ? budgetMonth : undefined,
           week: period === "weekly" ? Math.ceil(now.getDate() / 7) : undefined,
@@ -192,22 +217,19 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
             name: c.name,
             planned_amount: parseFloat(c.planned_amount),
             color: c.color,
+            mapped_category_ids: c.mapped_category_ids.length > 0 ? c.mapped_category_ids : null,
+            keyword_filter: c.keyword_filter || null,
           })),
         });
         toast.success("Budget berhasil dibuat!");
       }
       onAdded();
-    } catch {
-      toast.error(isEdit ? "Gagal memperbarui budget" : "Gagal menyimpan budget");
-    } finally {
-      setLoading(false);
-    }
+    } catch { toast.error(isEdit ? "Gagal memperbarui budget" : "Gagal menyimpan budget"); }
+    finally { setLoading(false); }
   }
 
-  const inputClass = "w-full bg-surface border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-text-secondary transition-colors";
-  const labelClass = "block text-xs font-medium text-text-secondary mb-1.5";
-
-  // Tahun pilihan: tahun lalu, sekarang, tahun depan
+  const ic = "w-full bg-surface border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-text-secondary transition-colors";
+  const lc = "block text-xs font-medium text-text-secondary mb-1.5";
   const yearOptions = [now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1];
 
   return (
@@ -225,170 +247,208 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
 
         <div className="overflow-y-auto flex-1 p-5 space-y-4">
 
-          {/* Period Toggle */}
+          {/* Period */}
           <div>
-            <label className={labelClass}>Tipe Periode {isEdit && <span className="text-accent">(tidak bisa diubah)</span>}</label>
+            <label className={lc}>Tipe Periode {isEdit && <span className="text-accent">(tidak bisa diubah)</span>}</label>
             <div className="flex gap-2">
               {(["monthly", "weekly"] as BudgetPeriod[]).map((p) => (
                 <button key={p} type="button" onClick={() => handlePeriodChange(p)} disabled={isEdit}
-                  className={cn(
-                    "flex-1 py-2 rounded-md text-sm font-medium border transition-colors",
+                  className={cn("flex-1 py-2 rounded-md text-sm font-medium border transition-colors",
                     period === p ? "bg-text-primary text-background border-text-primary" : "border-border text-text-secondary hover:border-accent",
-                    isEdit && "opacity-60 cursor-not-allowed"
-                  )}>
+                    isEdit && "opacity-60 cursor-not-allowed")}>
                   {p === "monthly" ? "Bulanan" : "Mingguan"}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Pilih Bulan & Tahun — untuk monthly, dan hanya saat buat baru */}
+          {/* Pilih bulan/tahun */}
           {period === "monthly" && (
             <div>
-              <label className={labelClass}>
-                Budget untuk bulan
-                {isEdit && <span className="text-accent ml-1">(tidak bisa diubah)</span>}
-              </label>
+              <label className={lc}>Budget untuk bulan {isEdit && <span className="text-accent">(tidak bisa diubah)</span>}</label>
               <div className="flex gap-2">
-                <select
-                  className={cn(inputClass, "flex-1 cursor-pointer")}
-                  value={budgetMonth}
-                  onChange={(e) => setBudgetMonth(Number(e.target.value))}
-                  disabled={isEdit}
-                >
-                  {MONTHS.map((m, i) => (
-                    <option key={i + 1} value={i + 1}>{m}</option>
-                  ))}
+                <select className={cn(ic, "flex-1 cursor-pointer")} value={budgetMonth}
+                  onChange={(e) => setBudgetMonth(Number(e.target.value))} disabled={isEdit}>
+                  {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
                 </select>
-                <select
-                  className={cn(inputClass, "w-28 cursor-pointer")}
-                  value={budgetYear}
-                  onChange={(e) => setBudgetYear(Number(e.target.value))}
-                  disabled={isEdit}
-                >
-                  {yearOptions.map((y) => (
-                    <option key={y} value={y}>{y}</option>
-                  ))}
+                <select className={cn(ic, "w-28 cursor-pointer")} value={budgetYear}
+                  onChange={(e) => setBudgetYear(Number(e.target.value))} disabled={isEdit}>
+                  {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
                 </select>
               </div>
               {!isEdit && (budgetMonth !== now.getMonth() + 1 || budgetYear !== now.getFullYear()) && (
                 <p className="text-[10px] text-warning mt-1.5 flex items-center gap-1">
-                  <AlertCircle size={10} />
-                  Budget ini hanya akan terpotong oleh transaksi bertanggal {MONTHS[budgetMonth - 1]} {budgetYear}
+                  <AlertCircle size={10} /> Budget ini hanya terpotong oleh transaksi bertanggal {MONTHS[budgetMonth - 1]} {budgetYear}
                 </p>
               )}
             </div>
           )}
 
-          {/* Integrasi Mingguan */}
+          {/* Integrasi mingguan */}
           {period === "weekly" && !isEdit && (
             <div className="bg-surface border border-border rounded-lg p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <Link2 size={13} className="text-accent shrink-0" />
                 <p className="text-xs font-medium text-text-primary">Hubungkan ke Budget Bulanan (opsional)</p>
               </div>
-              <p className="text-[11px] text-text-secondary">
-                Pilih budget bulanan dan kategori yang dikhususkan untuk mingguan. Nominal akan otomatis diisi dari sisa alokasi kategori tersebut.
-              </p>
-              {loadingParents ? (
-                <p className="text-xs text-text-secondary">Memuat budget bulanan...</p>
-              ) : monthlyBudgets.length === 0 ? (
-                <p className="text-xs text-text-secondary italic">Belum ada budget bulanan. Buat dulu baru bisa dihubungkan.</p>
-              ) : (
-                <>
-                  <div>
-                    <label className={labelClass}>Budget Bulanan</label>
-                    <select className={cn(inputClass, "cursor-pointer")} value={parentBudgetId}
-                      onChange={(e) => { setParentBudgetId(e.target.value); setWeeklySourceCategory(""); }}>
-                      <option value="">— Tidak dihubungkan —</option>
-                      {monthlyBudgets.map((b) => (
-                        <option key={b.id} value={b.id}>{b.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {parentBudgetId && (
-                    <div>
-                      <label className={labelClass}>Kategori yang dikhususkan untuk mingguan</label>
-                      <select className={cn(inputClass, "cursor-pointer")} value={weeklySourceCategory}
-                        onChange={(e) => setWeeklySourceCategory(e.target.value)}>
-                        <option value="">— Pilih kategori —</option>
-                        {parentCategories.map((c) => (
-                          <option key={c.id} value={c.name}>{c.name}</option>
-                        ))}
-                      </select>
-                    </div>
+              {loadingParents ? <p className="text-xs text-text-secondary">Memuat...</p>
+                : monthlyBudgets.length === 0 ? <p className="text-xs text-text-secondary italic">Belum ada budget bulanan.</p>
+                  : (
+                    <>
+                      <div>
+                        <label className={lc}>Budget Bulanan</label>
+                        <select className={cn(ic, "cursor-pointer")} value={parentBudgetId}
+                          onChange={(e) => { setParentBudgetId(e.target.value); setWeeklySourceCategory(""); }}>
+                          <option value="">— Tidak dihubungkan —</option>
+                          {monthlyBudgets.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                      </div>
+                      {parentBudgetId && (
+                        <div>
+                          <label className={lc}>Kategori yang dikhususkan untuk mingguan</label>
+                          <select className={cn(ic, "cursor-pointer")} value={weeklySourceCategory}
+                            onChange={(e) => setWeeklySourceCategory(e.target.value)}>
+                            <option value="">— Pilih kategori —</option>
+                            {parentCategories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                          </select>
+                        </div>
+                      )}
+                      {linkedCatData && (
+                        <div className={cn("rounded-md p-3 text-xs space-y-1", linkedCatPercent >= 100 ? "bg-danger/10 border border-danger/20" : "bg-success/10 border border-success/20")}>
+                          <p className="font-medium text-text-primary">{linkedCatData.name}</p>
+                          <div className="flex justify-between text-text-secondary">
+                            <span>Sisa tersedia:</span>
+                            <span className={cn("font-semibold", linkedCatPercent >= 100 ? "text-danger" : "text-success")}>
+                              {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 })
+                                .format(Math.max(0, Number(linkedCatData.planned_amount) - Number(linkedCatData.actual_amount)))}
+                            </span>
+                          </div>
+                          {linkedCatPercent >= 80 && <p className="text-[10px] text-warning">⚠️ Alokasi hampir habis!</p>}
+                        </div>
+                      )}
+                    </>
                   )}
-                  {linkedCatData && (
-                    <div className={cn("rounded-md p-3 text-xs space-y-1", linkedCatPercent >= 100 ? "bg-danger/10 border border-danger/20" : "bg-success/10 border border-success/20")}>
-                      <div className="flex items-center gap-1.5">
-                        <AlertCircle size={11} className={linkedCatPercent >= 100 ? "text-danger" : "text-success"} />
-                        <span className="font-medium text-text-primary">{linkedCatData.name} di budget bulanan</span>
-                      </div>
-                      <div className="flex justify-between text-text-secondary">
-                        <span>Direncanakan:</span>
-                        <span className="font-medium text-text-primary">{new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(Number(linkedCatData.planned_amount))}</span>
-                      </div>
-                      <div className="flex justify-between text-text-secondary">
-                        <span>Terpakai:</span>
-                        <span className={cn("font-medium", linkedCatPercent >= 100 ? "text-danger" : "text-text-primary")}>
-                          {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(Number(linkedCatData.actual_amount))} ({linkedCatPercent.toFixed(0)}%)
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-text-secondary">
-                        <span>Sisa tersedia:</span>
-                        <span className={cn("font-semibold", linkedCatPercent >= 100 ? "text-danger" : "text-success")}>
-                          {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(Math.max(0, Number(linkedCatData.planned_amount) - Number(linkedCatData.actual_amount)))}
-                        </span>
-                      </div>
-                      {linkedCatPercent >= 80 && <p className="text-[10px] text-warning font-medium pt-0.5">⚠️ Alokasi bulanan sudah hampir habis!</p>}
-                    </div>
-                  )}
-                </>
-              )}
             </div>
           )}
 
           {/* Name */}
           <div>
-            <label className={labelClass}>Nama Budget (opsional)</label>
-            <input className={inputClass} placeholder={`Budget ${period === "monthly" ? "Bulanan" : "Mingguan"} ${periodLabel}`}
+            <label className={lc}>Nama Budget (opsional)</label>
+            <input className={ic} placeholder={`Budget ${period === "monthly" ? "Bulanan" : "Mingguan"} ${periodLabel}`}
               value={name} onChange={(e) => setName(e.target.value)} />
           </div>
 
           {/* Income */}
           <div>
-            <label className={labelClass}>
-              Total Pemasukan (Rp)
+            <label className={lc}>Total Pemasukan (Rp)
               {weeklySourceCategory && linkedCatData && <span className="text-accent ml-1">— dari sisa alokasi {weeklySourceCategory}</span>}
             </label>
-            <input className={inputClass} type="number" min="0" placeholder="cth: 12450000"
+            <input className={ic} type="number" min="0" placeholder="cth: 12450000"
               value={totalIncome} onChange={(e) => setTotalIncome(e.target.value)} required />
           </div>
 
           {/* Categories */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className={cn(labelClass, "mb-0")}>Alokasi per Kategori</label>
-              <button type="button" onClick={addCategory} className="flex items-center gap-1 text-xs text-accent hover:text-text-primary transition-colors">
+              <label className={cn(lc, "mb-0")}>Alokasi per Kategori</label>
+              <button type="button" onClick={addCategory}
+                className="flex items-center gap-1 text-xs text-accent hover:text-text-primary transition-colors">
                 <Plus size={12} /> Tambah
               </button>
             </div>
             <div className="space-y-2">
               {categories.map((cat, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <input type="color" value={cat.color} onChange={(e) => updateCat(idx, "color", e.target.value)}
-                    className="w-7 h-7 rounded cursor-pointer border border-border bg-transparent shrink-0" />
-                  <input className={cn(inputClass, "flex-1")} placeholder="Nama kategori" value={cat.name}
-                    onChange={(e) => updateCat(idx, "name", e.target.value)} />
-                  <input className={cn(inputClass, "w-32")} type="number" min="0" placeholder="Rp"
-                    value={cat.planned_amount} onChange={(e) => updateCat(idx, "planned_amount", e.target.value)} />
-                  <button type="button" onClick={() => removeCategory(idx)} className="text-accent hover:text-danger transition-colors shrink-0">
-                    <Trash2 size={13} />
-                  </button>
+                <div key={idx} className="border border-border rounded-lg overflow-hidden">
+                  {/* Baris utama kategori */}
+                  <div className="flex items-center gap-2 p-2">
+                    <input type="color" value={cat.color}
+                      onChange={(e) => updateCat(idx, "color", e.target.value)}
+                      className="w-7 h-7 rounded cursor-pointer border border-border bg-transparent shrink-0" />
+                    <input className={cn(ic, "flex-1 border-0 bg-transparent px-1 focus:bg-surface rounded")}
+                      placeholder="Nama kategori" value={cat.name}
+                      onChange={(e) => updateCat(idx, "name", e.target.value)} />
+                    <input className={cn(ic, "w-32 border-0 bg-transparent px-1 focus:bg-surface rounded")}
+                      type="number" min="0" placeholder="Rp" value={cat.planned_amount}
+                      onChange={(e) => updateCat(idx, "planned_amount", e.target.value)} />
+                    {/* Tombol mapping */}
+                    <button type="button" onClick={() => toggleMapping(idx)}
+                      title="Set mapping kategori transaksi"
+                      className={cn("p-1 rounded transition-colors shrink-0",
+                        cat.showMapping || cat.mapped_category_ids.length > 0
+                          ? "text-text-primary" : "text-accent hover:text-text-primary")}>
+                      {cat.showMapping ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                    </button>
+                    <button type="button" onClick={() => removeCategory(idx)}
+                      className="text-accent hover:text-danger transition-colors shrink-0">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+
+                  {/* Panel mapping — expandable */}
+                  {cat.showMapping && (
+                    <div className="border-t border-border bg-surface px-3 py-3 space-y-3">
+                      <div>
+                        <p className="text-[11px] font-medium text-text-primary mb-1">
+                          Tangkap dari kategori transaksi:
+                        </p>
+                        <p className="text-[10px] text-text-secondary mb-2">
+                          Transaksi dengan kategori yang dicentang akan otomatis masuk ke budget kategori ini.
+                        </p>
+                        {txCategories.length === 0 ? (
+                          <p className="text-[10px] text-accent italic">Belum ada kategori transaksi.</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5">
+                            {txCategories.map((tc) => {
+                              const checked = cat.mapped_category_ids.includes(tc.id);
+                              return (
+                                <button key={tc.id} type="button"
+                                  onClick={() => toggleMappedCat(idx, tc.id)}
+                                  className={cn(
+                                    "px-2 py-1 rounded-full text-[11px] font-medium border transition-colors",
+                                    checked
+                                      ? "bg-text-primary text-background border-text-primary"
+                                      : "border-border text-text-secondary hover:border-accent"
+                                  )}>
+                                  {checked && "✓ "}{tc.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Keyword filter — muncul kalau sudah ada mapping */}
+                      {cat.mapped_category_ids.length > 0 && (
+                        <div>
+                          <label className="block text-[11px] font-medium text-text-secondary mb-1">
+                            Filter kata kunci <span className="font-normal text-accent">(opsional)</span>
+                          </label>
+                          <input
+                            className={cn(ic, "text-xs py-1.5")}
+                            placeholder='cth: "KPR", "motor", "Netflix"'
+                            value={cat.keyword_filter}
+                            onChange={(e) => updateCat(idx, "keyword_filter", e.target.value)}
+                          />
+                          <p className="text-[10px] text-text-secondary mt-1">
+                            Hanya transaksi yang <span className="font-medium">namanya mengandung kata ini</span> yang akan masuk ke sini. Kosongkan untuk tangkap semua.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Ringkasan mapping */}
+                      {cat.mapped_category_ids.length > 0 && (
+                        <div className="text-[10px] text-success bg-success/10 rounded px-2 py-1.5">
+                          ✓ Menangkap: <span className="font-medium">
+                            {cat.mapped_category_ids.map((id) => txCategories.find((t) => t.id === id)?.name ?? id).join(", ")}
+                          </span>
+                          {cat.keyword_filter && <> · kata kunci "<span className="font-medium">{cat.keyword_filter}</span>"</>}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
-            {isEdit && <p className="text-[10px] text-warning mt-2">Menghapus kategori akan menghapus juga riwayat realisasi (actual) kategori tersebut.</p>}
           </div>
 
           {/* Summary */}
@@ -396,7 +456,9 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
             <div className="bg-surface rounded-lg p-3 space-y-1.5">
               <div className="flex justify-between text-xs">
                 <span className="text-text-secondary">Total direncanakan</span>
-                <span className="text-text-primary font-medium">{new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(totalPlanned)}</span>
+                <span className="text-text-primary font-medium">
+                  {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(totalPlanned)}
+                </span>
               </div>
               <div className="flex justify-between text-xs">
                 <span className="text-text-secondary">Sisa income</span>
@@ -410,15 +472,16 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
 
           {/* Notes */}
           <div>
-            <label className={labelClass}>Catatan (opsional)</label>
-            <textarea className={cn(inputClass, "resize-none")} rows={2}
+            <label className={lc}>Catatan (opsional)</label>
+            <textarea className={cn(ic, "resize-none")} rows={2}
               placeholder="cth: Fokus kurangi makan di luar bulan ini"
               value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
         </div>
 
         <div className="p-5 border-t border-border shrink-0 flex gap-2">
-          <button type="button" onClick={onClose} className="flex-1 py-2 rounded-md border border-border text-sm text-text-secondary hover:border-accent transition-colors">
+          <button type="button" onClick={onClose}
+            className="flex-1 py-2 rounded-md border border-border text-sm text-text-secondary hover:border-accent transition-colors">
             Batal
           </button>
           <button onClick={handleSubmit} disabled={loading}
