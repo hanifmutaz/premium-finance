@@ -82,11 +82,11 @@ export async function addTransaction(
         });
     }
 
-    // Sync ke budget.
-    // Bug fix: jangan skip kalau category null — kalau ada overrideBudgetId atau
-    // category_id, tetap coba sync via mapping. categoryName fallback ke "" supaya
-    // name-matching skip, tapi mapping via txCategoryId tetap berjalan.
-    if (tx.type === "expense" || tx.type === "debt_payment") {
+    // Sync ke budget untuk expense, debt_payment, dan saving.
+    // categoryName fallback ke "" supaya name-matching skip tapi mapping via ID tetap jalan.
+    // Untuk debt_payment, pass juga debt_name sebagai txName supaya keyword matching bisa
+    // auto-match nama utang ke kategori budget (mis. "KPR BRI" → budget cat keyword "KPR").
+    if (tx.type === "expense" || tx.type === "debt_payment" || tx.type === "saving") {
         await syncBudgetActual(
             userId,
             data.category?.name ?? "",
@@ -239,17 +239,18 @@ async function syncBudgetActual(
         if (!allCats || allCats.length === 0) continue;
 
         // Cari kategori budget yang cocok — prioritas:
-        // 1. Ada mapped_category_ids yang mengandung txCategoryId (+ keyword_filter kalau diset)
-        // 2. Fallback: nama kategori budget == nama kategori transaksi (behavior lama)
+        // 1. mapped_category_ids cocok + keyword_filter match nama transaksi
+        // 2. mapped_category_ids cocok tanpa keyword (tangkap semua)
+        // 3. Untuk debt_payment: cari budget cat yang keyword_filter-nya ada di nama transaksi
+        //    (mis. txName="Bayar Utang: KPR BRI", keyword="KPR" → match)
+        // 4. Fallback: nama kategori budget == nama kategori transaksi
         let matchedCat: typeof allCats[0] | null = null;
 
         if (txCategoryId) {
-            // Coba cari via mapping dulu
             for (const cat of allCats) {
                 const mapped = cat.mapped_category_ids as string[] | null;
                 if (!mapped || !mapped.includes(txCategoryId)) continue;
 
-                // Kalau ada keyword_filter, cek nama transaksi juga
                 if (cat.keyword_filter && txName) {
                     const keyword = (cat.keyword_filter as string).toLowerCase();
                     if (!txName.toLowerCase().includes(keyword)) continue;
@@ -260,8 +261,20 @@ async function syncBudgetActual(
             }
         }
 
-        // Fallback ke name matching kalau belum ketemu via mapping
-        if (!matchedCat) {
+        // Fallback 3: untuk debt_payment/saving tanpa category, cari via keyword di nama transaksi
+        if (!matchedCat && txName) {
+            for (const cat of allCats) {
+                if (!cat.keyword_filter) continue;
+                const keyword = (cat.keyword_filter as string).toLowerCase();
+                if (txName.toLowerCase().includes(keyword)) {
+                    matchedCat = cat;
+                    break;
+                }
+            }
+        }
+
+        // Fallback 4: name matching (behavior lama)
+        if (!matchedCat && categoryName) {
             matchedCat = allCats.find(
                 (c) => c.name.toLowerCase() === categoryName.toLowerCase()
             ) ?? null;

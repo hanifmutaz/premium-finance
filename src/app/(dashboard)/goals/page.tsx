@@ -45,6 +45,8 @@ export default function GoalsPage() {
   async function handleAddSaving(goal: Goal, amount: number) {
     try {
       const updated = await updateGoalAmount(goal.id, Number(goal.current_amount) + amount);
+      // Nama transaksi menyertakan nama goal supaya keyword_filter di budget
+      // category bisa auto-match (mis. "Nabung: Dana Darurat" → keyword "Dana Darurat")
       await addTransaction({
         type: "saving",
         name: `Nabung: ${goal.name}`,
