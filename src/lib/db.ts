@@ -208,23 +208,55 @@ async function syncBudgetActual(
     const dayOfMonth = date.getDate();
     const week = Math.ceil(dayOfMonth / 7);
 
-    let budgets: { id: string; period: string; year: number; month?: number; week?: number }[] | null = null;
+    let budgets: { id: string; period: string; year: number; month?: number; week?: number; parent_budget_id?: string | null }[] | null = null;
 
     if (overrideBudgetId) {
+        // Ambil budget yang dipilih user
         const { data } = await supabase
             .from("budgets")
-            .select("id, period, year, month, week")
+            .select("id, period, year, month, week, parent_budget_id")
             .eq("id", overrideBudgetId)
             .eq("user_id", userId);
-        budgets = data;
+        budgets = data ?? [];
+
+        // Kalau budget ini punya parent (budget mingguan → bulanan),
+        // ikut-sertakan parent-nya juga supaya keduanya ter-sync
+        const parentId = budgets?.[0]?.parent_budget_id;
+        if (parentId) {
+            const { data: parentData } = await supabase
+                .from("budgets")
+                .select("id, period, year, month, week, parent_budget_id")
+                .eq("id", parentId)
+                .eq("user_id", userId);
+            if (parentData && parentData.length > 0) {
+                budgets = [...budgets, ...parentData];
+            }
+        }
     } else {
+        // Default: cari semua budget yang bulan/tahunnya cocok dengan tanggal transaksi
+        // Ambil monthly + weekly yang cover tanggal ini, plus parent dari weekly manapun
         const { data } = await supabase
             .from("budgets")
-            .select("id, period, year, month, week")
+            .select("id, period, year, month, week, parent_budget_id")
             .eq("user_id", userId)
             .eq("year", year)
             .or(`and(period.eq.monthly,month.eq.${month}),and(period.eq.weekly,month.eq.${month},week.eq.${week})`);
-        budgets = data;
+        budgets = data ?? [];
+
+        // Ikut-sertakan parent budget dari weekly yang belum ada di list
+        const existingIds = new Set((budgets ?? []).map((b) => b.id));
+        const parentIds = (budgets ?? [])
+            .map((b) => b.parent_budget_id)
+            .filter((id): id is string => !!id && !existingIds.has(id));
+
+        if (parentIds.length > 0) {
+            const { data: parentData } = await supabase
+                .from("budgets")
+                .select("id, period, year, month, week, parent_budget_id")
+                .in("id", parentIds)
+                .eq("user_id", userId);
+            if (parentData) budgets = [...(budgets ?? []), ...parentData];
+        }
     }
 
     if (!budgets || budgets.length === 0) return;
