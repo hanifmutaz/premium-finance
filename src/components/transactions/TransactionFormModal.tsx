@@ -3,7 +3,12 @@
 import { useState, useEffect } from "react";
 import { X, Loader2, BookOpen } from "lucide-react";
 import { toast } from "sonner";
-import { cn } from "@/utils";
+import {
+  cn,
+  formatInputNumber,
+  parseInputNumber,
+  formatCurrency,
+} from "@/utils";
 import {
   addTransaction,
   updateTransaction,
@@ -54,7 +59,8 @@ function emptyForm() {
     name: "",
     description: "",
     category_id: "",
-    amount: "",
+    amountDisplay: "",
+    amountRaw: "",
     account_id: "",
     date: new Date().toISOString().split("T")[0],
     payment_method: "transfer" as PaymentMethod,
@@ -77,11 +83,13 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
     if (!open) return;
     if (editData) {
       setType(editData.type);
+      const raw = String(editData.amount);
       setForm({
         name: editData.name,
         description: editData.description ?? "",
         category_id: editData.category_id ?? "",
-        amount: String(editData.amount),
+        amountRaw: raw,
+        amountDisplay: formatInputNumber(raw),
         account_id: editData.account_id ?? "",
         date: editData.date,
         payment_method: editData.payment_method,
@@ -108,7 +116,6 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
     }
   }, [open, type]);
 
-  // Load budget saat form dibuka, hanya untuk expense
   useEffect(() => {
     if (open && (type === "expense" || type === "debt_payment")) {
       getBudgets()
@@ -117,32 +124,44 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
     }
   }, [open, type]);
 
-  // Budget yang tersedia: semua yang ada (biar bisa pilih bulan depan)
+  useEffect(() => {
+    if (type !== "expense" && type !== "debt_payment") setOverrideBudgetId("");
+  }, [type]);
+
+  function handleAmountChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = parseInputNumber(e.target.value);
+    setForm((f) => ({
+      ...f,
+      amountRaw: raw,
+      amountDisplay: formatInputNumber(raw),
+    }));
+  }
+
+  const isExpenseType = type === "expense" || type === "debt_payment";
   const expenseBudgets = budgets.filter(
     (b) => b.period === "monthly" || b.period === "weekly",
   );
+  const selectedBudget = expenseBudgets.find((b) => b.id === overrideBudgetId);
 
-  // Kalau type bukan expense/debt_payment, reset override
-  useEffect(() => {
-    if (type !== "expense" && type !== "debt_payment") {
-      setOverrideBudgetId("");
-    }
-  }, [type]);
-
-  // Label budget buat dropdown — tampilkan nama + bulan/tahunnya
   function budgetLabel(b: Budget) {
     if (b.period === "monthly" && b.month) {
-      return `${b.name} (${MONTHS[(b.month ?? 1) - 1]} ${b.year})`;
+      return `${b.name} · ${MONTHS[(b.month ?? 1) - 1]} ${b.year}`;
     }
     return b.name;
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.name || !form.amount) {
+    if (!form.name || !form.amountRaw) {
       toast.error("Nama dan nominal wajib diisi");
       return;
     }
+    const amount = parseFloat(form.amountRaw);
+    if (isNaN(amount) || amount <= 0) {
+      toast.error("Nominal tidak valid");
+      return;
+    }
+
     setLoading(true);
     try {
       if (isEdit && editData) {
@@ -151,7 +170,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
           name: form.name,
           description: form.description || undefined,
           category_id: form.category_id || undefined,
-          amount: parseFloat(form.amount),
+          amount,
           account_id:
             type !== "transfer" ? form.account_id || undefined : undefined,
           date: form.date,
@@ -165,7 +184,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
             name: form.name,
             description: form.description || undefined,
             category_id: form.category_id || undefined,
-            amount: parseFloat(form.amount),
+            amount,
             account_id:
               type !== "transfer" ? form.account_id || undefined : undefined,
             date: form.date,
@@ -193,7 +212,6 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
   const inputClass =
     "w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent transition-colors";
   const labelClass = "block text-xs text-text-secondary mb-1.5";
-  const isExpenseType = type === "expense" || type === "debt_payment";
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
@@ -215,7 +233,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
         </div>
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
-          {/* Type Toggle */}
+          {/* Type toggle */}
           <div className="grid grid-cols-3 gap-1.5 p-1 bg-surface rounded-lg">
             {(
               [
@@ -262,21 +280,27 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
             />
           </div>
 
-          {/* Amount */}
+          {/* Amount — formatted dengan titik ribuan, tapi value-nya angka bersih */}
           <div>
             <label className={labelClass}>Nominal *</label>
             <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-accent text-sm">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-accent text-sm font-medium">
                 Rp
               </span>
               <input
-                type="number"
-                value={form.amount}
-                onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                inputMode="numeric"
+                value={form.amountDisplay}
+                onChange={handleAmountChange}
                 placeholder="0"
                 className={cn(inputClass, "pl-9 tabular-nums")}
               />
             </div>
+            {/* Preview formatted kalau udah ada nilai */}
+            {form.amountRaw && Number(form.amountRaw) > 0 && (
+              <p className="text-[11px] text-text-secondary mt-1 tabular-nums">
+                = {formatCurrency(Number(form.amountRaw))}
+              </p>
+            )}
           </div>
 
           {/* Date & Category */}
@@ -309,7 +333,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
             </div>
           </div>
 
-          {/* Masukkan ke Budget — hanya untuk expense/debt, hanya saat tambah baru */}
+          {/* Budget override */}
           {isExpenseType && !isEdit && expenseBudgets.length > 0 && (
             <div>
               <label className={cn(labelClass, "flex items-center gap-1.5")}>
@@ -329,16 +353,17 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
                   </option>
                 ))}
               </select>
-              {overrideBudgetId && (
-                <p className="text-[10px] text-warning mt-1.5">
-                  ⚡ Transaksi ini akan dipotong dari budget yang lo pilih,
-                  bukan dari bulan tanggal transaksi.
+              {selectedBudget && (
+                <p className="text-[10px] text-warning mt-1.5 flex items-center gap-1">
+                  ⚡ Dipotong dari budget{" "}
+                  <span className="font-semibold">{selectedBudget.name}</span>,
+                  bukan bulan tanggal transaksi.
                 </p>
               )}
             </div>
           )}
 
-          {/* Payment Method */}
+          {/* Payment method */}
           <div>
             <label className={labelClass}>Metode Pembayaran</label>
             <select

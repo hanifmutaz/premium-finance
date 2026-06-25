@@ -1,6 +1,12 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
-import { format, formatDistanceToNow, isAfter, isBefore, parseISO } from "date-fns";
+import {
+  format,
+  formatDistanceToNow,
+  isAfter,
+  isBefore,
+  parseISO,
+} from "date-fns";
 import { id } from "date-fns/locale";
 
 export function cn(...inputs: ClassValue[]) {
@@ -99,4 +105,22 @@ export function getInitials(name: string): string {
 
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ─── Input number formatting ───────────────────────────────────────────────────
+/**
+ * Format angka buat ditampilkan di input nominal (tanpa simbol Rp).
+ * "12500000" → "12.500.000"  |  "" / "0" → ""
+ */
+export function formatInputNumber(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  if (!digits || digits === "0") return "";
+  return new Intl.NumberFormat("id-ID").format(Number(digits));
+}
+
+/**
+ * Parse balik dari display "12.500.000" → raw digits "12500000"
+ */
+export function parseInputNumber(display: string): string {
+  return display.replace(/\./g, "").replace(/\D/g, "");
 }
