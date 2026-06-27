@@ -1,8 +1,8 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useState, useEffect } from "react";
-import { Plus, ArrowLeftRight, Wallet, Landmark, Smartphone, MoreHorizontal, Trash2, Pencil } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { Plus, ArrowLeftRight, Wallet, Landmark, Smartphone, MoreHorizontal, Trash2, Pencil, TrendingDown } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency, cn } from "@/utils";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -41,6 +41,17 @@ export default function AccountsPage() {
     useEffect(() => { load(); }, []);
 
     const totalBalance = accounts.reduce((s, a) => s + a.balance, 0);
+
+    const expenseBreakdown = useMemo(() => {
+        const totalExpense = accounts.reduce((s, a) => s + a.monthly_expense, 0);
+        return accounts
+            .filter((a) => a.monthly_expense > 0)
+            .sort((a, b) => b.monthly_expense - a.monthly_expense)
+            .map((a) => ({
+                ...a,
+                percent: totalExpense > 0 ? (a.monthly_expense / totalExpense) * 100 : 0,
+            }));
+    }, [accounts]);
 
     async function handleDelete(id: string) {
         try { await deleteAccount(id); toast.success("Akun dihapus"); load(); }
@@ -140,9 +151,46 @@ export default function AccountsPage() {
                                 <p className={cn("text-xl font-semibold tabular-nums", acc.balance >= 0 ? "text-text-primary" : "text-danger")}>
                                     {formatCurrency(acc.balance)}
                                 </p>
+                                <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-border">
+                                    <TrendingDown size={11} className="text-text-secondary" />
+                                    <span className="text-[11px] text-text-secondary">Keluar bulan ini:</span>
+                                    <span className="text-[11px] font-medium text-text-primary tabular-nums">
+                                        {formatCurrency(acc.monthly_expense, true)}
+                                    </span>
+                                </div>
                             </div>
                         );
                     })}
+                </div>
+            )}
+
+            {expenseBreakdown.length > 0 && (
+                <div className="card-base p-5">
+                    <div className="mb-4">
+                        <h2 className="text-sm font-semibold text-text-primary">Pengeluaran per Akun Bulan Ini</h2>
+                        <p className="text-xs text-text-secondary mt-0.5">Dari mana aja uang paling banyak kepake</p>
+                    </div>
+                    <div className="space-y-3">
+                        {expenseBreakdown.map((acc) => (
+                            <div key={acc.id}>
+                                <div className="flex items-center justify-between mb-1.5">
+                                    <div className="flex items-center gap-2">
+                                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: acc.color || "#64748B" }} />
+                                        <span className="text-xs font-medium text-text-primary">{acc.name}</span>
+                                    </div>
+                                    <span className="text-xs text-text-secondary tabular-nums">
+                                        {formatCurrency(acc.monthly_expense, true)} · {Math.round(acc.percent)}%
+                                    </span>
+                                </div>
+                                <div className="w-full h-1.5 bg-surface rounded-full overflow-hidden">
+                                    <div
+                                        className="h-full rounded-full transition-all duration-700"
+                                        style={{ width: `${acc.percent}%`, backgroundColor: acc.color || "#64748B" }}
+                                    />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
 

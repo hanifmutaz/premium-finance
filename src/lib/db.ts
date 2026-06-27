@@ -44,16 +44,29 @@ export async function seedDefaultCategories(userId: string) {
 }
 
 // ─── Transactions ─────────────────────────────────────────────────────────────
-export async function getTransactions(filters?: { type?: string; search?: string; limit?: number }) {
+export async function getTransactions(filters?: { type?: string; search?: string; accountId?: string; limit?: number }) {
     const { supabase, userId } = await getSupabaseUser();
+    // Embed akun lewat nama constraint FK (transactions punya 2 FK ke accounts:
+    // account_id & to_account_id), jadi PostgREST butuh disambiguasi eksplisit.
     let query = supabase
         .from("transactions")
-        .select("*, category:categories(*)")
+        .select(`
+            *,
+            category:categories(*),
+            account:accounts!transactions_account_id_fkey(*),
+            to_account:accounts!transactions_to_account_id_fkey(*)
+        `)
         .eq("user_id", userId)
+        // date doang gak cukup buat urutan stabil — kalau ada >1 transaksi di
+        // tanggal yang sama, urutannya antar mereka gak konsisten tiap reload
+        // (Postgres gak guarantee urutan tanpa secondary sort). created_at desc
+        // sebagai tiebreak bikin urutan selalu sama & sesuai jam input.
         .order("date", { ascending: false })
+        .order("created_at", { ascending: false })
         .limit(filters?.limit ?? 100);
 
     if (filters?.type && filters.type !== "all") query = query.eq("type", filters.type);
+    if (filters?.accountId && filters.accountId !== "all") query = query.eq("account_id", filters.accountId);
     if (filters?.search) query = query.ilike("name", `%${filters.search}%`);
 
     const { data, error } = await query;
@@ -99,10 +112,14 @@ export async function getAccounts(): Promise<AccountWithBalance[]> {
 
     const [{ data: accounts, error: accError }, { data: txs, error: txError }] = await Promise.all([
         supabase.from("accounts").select("*").eq("user_id", userId).order("created_at"),
-        supabase.from("transactions").select("type, amount, account_id, to_account_id").eq("user_id", userId),
+        supabase.from("transactions").select("type, amount, date, account_id, to_account_id").eq("user_id", userId),
     ]);
     if (accError) throw accError;
     if (txError) throw txError;
+
+    const now = new Date();
+    const curMonth = now.getMonth();
+    const curYear = now.getFullYear();
 
     // Saldo per akun = saldo_awal + semua transaksi yang nyentuh akun ini.
     // "transfer" itu khusus: ngurangin akun asal (account_id), nambahin akun
@@ -110,6 +127,7 @@ export async function getAccounts(): Promise<AccountWithBalance[]> {
     // cuma nyentuh satu akun (account_id) — income nambah, sisanya ngurangin.
     return (accounts ?? []).map((acc) => {
         let balance = Number(acc.initial_balance);
+        let monthly_expense = 0;
         (txs ?? []).forEach((t) => {
             const amt = Number(t.amount);
             if (t.type === "transfer") {
@@ -117,9 +135,19 @@ export async function getAccounts(): Promise<AccountWithBalance[]> {
                 if (t.to_account_id === acc.id) balance += amt;
             } else if (t.account_id === acc.id) {
                 balance += t.type === "income" ? amt : -amt;
+
+                // "Pengeluaran" di sini ngikutin definisi yang udah dipakai di
+                // halaman Transaksi: semua tipe selain income & transfer
+                // (expense, debt_payment, saving) — bukan cuma type="expense".
+                if (t.type !== "income") {
+                    const d = new Date(t.date);
+                    if (d.getMonth() === curMonth && d.getFullYear() === curYear) {
+                        monthly_expense += amt;
+                    }
+                }
             }
         });
-        return { ...acc, balance } as AccountWithBalance;
+        return { ...acc, balance, monthly_expense } as AccountWithBalance;
     });
 }
 

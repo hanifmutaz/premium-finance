@@ -61,6 +61,7 @@ export interface Account {
 }
 export interface AccountWithBalance extends Account {
   balance: number;
+  monthly_expense: number;
 }
 
 // ─── Debt ─────────────────────────────────────────────────────────────────────
