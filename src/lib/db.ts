@@ -65,38 +65,30 @@ export async function addTransaction(
     tx: Omit<Transaction, "id" | "user_id" | "created_at" | "updated_at" | "category">,
     overrideBudgetId?: string | null,
 ) {
-    const { supabase, userId } = await getSupabaseUser();
-    const { data, error } = await supabase
-        .from("transactions")
-        .insert({ ...tx, user_id: userId, category_id: tx.category_id || null })
-        .select("*, category:categories(*)")
-        .single();
+    const { supabase } = await getSupabaseUser();
+
+    // Insert transaksi + (kalau debt_payment) catat debt_payments + sync budget
+    // semuanya lewat 1 RPC ke fungsi `add_transaction_with_effects` di Postgres,
+    // supaya jadi SATU database transaction yang atomic. Kalau salah satu
+    // langkah gagal di tengah (mis. koneksi putus pas sync budget), SEMUA
+    // efeknya di-rollback bareng — gak ada transaksi yang "nyangkut" tanpa
+    // ke-sync ke debt/budget seperti versi lama (3 request JS berurutan).
+    const { data, error } = await supabase.rpc("add_transaction_with_effects", {
+        p_type: tx.type,
+        p_name: tx.name,
+        p_amount: tx.amount,
+        p_date: tx.date,
+        p_description: tx.description ?? null,
+        p_category_id: tx.category_id || null,
+        p_payment_method: tx.payment_method,
+        p_status: tx.status,
+        p_attachment_url: tx.attachment_url ?? null,
+        p_debt_id: tx.debt_id ?? null,
+        p_account_id: tx.account_id ?? null,
+        p_to_account_id: tx.to_account_id ?? null,
+        p_override_budget_id: overrideBudgetId ?? null,
+    });
     if (error) throw error;
-
-    if (tx.type === "debt_payment" && tx.debt_id) {
-        await supabase.from("debt_payments").insert({
-            debt_id: tx.debt_id,
-            transaction_id: data.id,
-            amount: tx.amount,
-            date: tx.date,
-        });
-    }
-
-    // Sync ke budget untuk expense, debt_payment, dan saving.
-    // categoryName fallback ke "" supaya name-matching skip tapi mapping via ID tetap jalan.
-    // Untuk debt_payment, pass juga debt_name sebagai txName supaya keyword matching bisa
-    // auto-match nama utang ke kategori budget (mis. "KPR BRI" → budget cat keyword "KPR").
-    if (tx.type === "expense" || tx.type === "debt_payment" || tx.type === "saving") {
-        await syncBudgetActual(
-            userId,
-            data.category?.name ?? "",
-            tx.amount,
-            tx.date,
-            overrideBudgetId,
-            tx.category_id ?? null,
-            tx.name ?? null,
-        );
-    }
 
     return data as Transaction;
 }
@@ -700,7 +692,7 @@ export async function getDashboardStats() {
             .eq("user_id", userId).gte("date", firstDay).lte("date", lastDay),
         supabase.from("transactions").select("type, amount")
             .eq("user_id", userId).gte("date", prevFirstDay).lte("date", prevLastDay),
-        supabase.from("debts").select("*").eq("user_id", userId).eq("status", "active"),
+        supabase.from("debts").select("*").eq("user_id", userId).in("status", ["active", "overdue"]),
         supabase.from("receivables").select("*").eq("user_id", userId).eq("status", "active"),
     ]);
 

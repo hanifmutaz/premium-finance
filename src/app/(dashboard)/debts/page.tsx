@@ -129,7 +129,7 @@ function InstallmentCard({
       </div>
 
       {/* Action */}
-      {debt.status === "active" && (
+      {(debt.status === "active" || debt.status === "overdue") && (
         <div className="px-5 py-3 border-t border-border">
           <button onClick={onPay}
             className="w-full py-2 text-xs font-medium text-text-secondary border border-border rounded-lg hover:border-text-primary hover:text-text-primary transition-colors flex items-center justify-center gap-1.5">
@@ -228,7 +228,7 @@ function DebtCard({
       </div>
 
       {/* Action */}
-      {debt.status === "active" && (
+      {(debt.status === "active" || debt.status === "overdue") && (
         <div className="px-5 py-3 border-t border-border">
           <button onClick={onPay}
             className="w-full py-2 text-xs font-medium text-text-secondary border border-border rounded-lg hover:border-text-primary hover:text-text-primary transition-colors flex items-center justify-center gap-1.5">
@@ -259,7 +259,7 @@ export default function DebtsPage() {
 
   useEffect(() => { load(); }, []);
 
-  const active = debts.filter((d) => d.status === "active");
+  const active = debts.filter((d) => d.status === "active" || d.status === "overdue");
   const completed = debts.filter((d) => d.status === "completed");
   const displayed = tab === "active" ? active : completed;
   const totalDebt = active.reduce((s, d) => s + Number(d.remaining), 0);

@@ -7,7 +7,7 @@ import type { Debt } from "@/types";
 interface Props { debts: Debt[]; }
 
 export function DebtOverviewWidget({ debts }: Props) {
-  const active = debts.filter((d) => d.status === "active");
+  const active = debts.filter((d) => d.status === "active" || d.status === "overdue");
   const totalAmount = active.reduce((s, d) => s + Number(d.total_amount), 0);
   const totalPaid = active.reduce((s, d) => s + Number(d.total_paid), 0);
   const totalRemaining = active.reduce((s, d) => s + Number(d.remaining), 0);
