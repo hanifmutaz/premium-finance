@@ -2,13 +2,14 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect, useMemo } from "react";
-import { Plus, ArrowLeftRight, Wallet, Landmark, Smartphone, MoreHorizontal, Trash2, Pencil, TrendingDown } from "lucide-react";
+import { Plus, ArrowLeftRight, Wallet, Landmark, Smartphone, MoreHorizontal, Trash2, Pencil, TrendingDown, Scale } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency, cn } from "@/utils";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { AccountFormModal } from "@/components/accounts/AccountFormModal";
 import { TransferModal } from "@/components/accounts/TransferModal";
+import { AccountReconcileModal } from "@/components/accounts/AccountReconcileModal";
 import { getAccounts, deleteAccount } from "@/lib/db";
 import type { AccountWithBalance, AccountType } from "@/types";
 
@@ -30,6 +31,7 @@ export default function AccountsPage() {
     const [editData, setEditData] = useState<AccountWithBalance | null>(null);
     const [deleteId, setDeleteId] = useState<string | null>(null);
     const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+    const [reconcileAcc, setReconcileAcc] = useState<AccountWithBalance | null>(null);
 
     async function load() {
         setLoading(true);
@@ -135,10 +137,14 @@ export default function AccountsPage() {
                                             <MoreHorizontal size={15} />
                                         </button>
                                         {openMenuId === acc.id && (
-                                            <div className="absolute right-0 top-7 bg-surface-card border border-border rounded-md shadow-lg z-10 overflow-hidden w-32">
+                                            <div className="absolute right-0 top-7 bg-surface-card border border-border rounded-md shadow-lg z-10 overflow-hidden w-40">
                                                 <button onClick={() => openEdit(acc)}
                                                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-primary hover:bg-surface transition-colors">
                                                     <Pencil size={12} /> Edit
+                                                </button>
+                                                <button onClick={() => { setReconcileAcc(acc); setOpenMenuId(null); }}
+                                                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-text-primary hover:bg-surface transition-colors">
+                                                    <Scale size={12} /> Sesuaikan Saldo
                                                 </button>
                                                 <button onClick={() => { setDeleteId(acc.id); setOpenMenuId(null); }}
                                                     className="w-full flex items-center gap-2 px-3 py-2 text-xs text-danger hover:bg-surface transition-colors">
@@ -196,6 +202,13 @@ export default function AccountsPage() {
 
             <AccountFormModal open={showForm} onClose={() => { setShowForm(false); setEditData(null); load(); }} editData={editData} />
             <TransferModal open={showTransfer} onClose={() => { setShowTransfer(false); load(); }} accounts={accounts} />
+            {reconcileAcc && (
+                <AccountReconcileModal
+                    account={reconcileAcc}
+                    onClose={() => setReconcileAcc(null)}
+                    onDone={() => { setReconcileAcc(null); load(); }}
+                />
+            )}
             <ConfirmDialog
                 open={!!deleteId}
                 title="Hapus akun ini?"
