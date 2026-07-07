@@ -242,7 +242,12 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
                 "debt_payment",
                 "transfer",
                 "saving",
-              ] as TransactionType[]
+                // "receivable_out" sengaja gak dimasukin di sini — transaksi
+                // tipe ini cuma boleh dibuat otomatis lewat halaman Piutang
+                // (addReceivable), biar selalu nyambung ke satu record
+                // receivables. Bikin manual dari sini bisa bikin transaksi
+                // "piutang keluar" yatim tanpa catatan piutangnya.
+              ] as const
             ).map((t) => {
               const labels = {
                 income: "Masuk",

@@ -123,8 +123,9 @@ export async function getAccounts(): Promise<AccountWithBalance[]> {
 
     // Saldo per akun = saldo_awal + semua transaksi yang nyentuh akun ini.
     // "transfer" itu khusus: ngurangin akun asal (account_id), nambahin akun
-    // tujuan (to_account_id). Tipe lain (income/expense/debt_payment/saving)
-    // cuma nyentuh satu akun (account_id) — income nambah, sisanya ngurangin.
+    // tujuan (to_account_id). Tipe lain (income/expense/debt_payment/saving/
+    // receivable_out) cuma nyentuh satu akun (account_id) — income nambah,
+    // sisanya (termasuk receivable_out, piutang keluar) ngurangin.
     return (accounts ?? []).map((acc) => {
         let balance = Number(acc.initial_balance);
         let monthly_expense = 0;
@@ -954,7 +955,7 @@ export async function getReceivables() {
     const { supabase, userId } = await getSupabaseUser();
     const { data, error } = await supabase
         .from("receivables")
-        .select("*")
+        .select("*, account:accounts(*)")
         .eq("user_id", userId)
         .order("due_date", { ascending: true });
     if (error) throw error;
@@ -964,19 +965,36 @@ export async function getReceivables() {
 export async function addReceivable(recv: {
     name: string; borrower: string; total_amount: number;
     start_date: string; due_date: string; priority: string; notes?: string;
+    account_id: string;
 }) {
     const { supabase, userId } = await getSupabaseUser();
+
+    // Piutang keluar = uang beneran ninggalin salah satu akun kita. Dicatat
+    // sebagai transaksi "receivable_out" (bukan "expense") — pola yang sama
+    // kayak debt_payment: ngurangin saldo akun & kehitung cash-out bulanan,
+    // tapi TIDAK ikut breakdown kategori pengeluaran.
+    const tx = await addTransaction({
+        type: "receivable_out",
+        name: `Piutang: ${recv.name}`,
+        description: `Dipinjamkan ke ${recv.borrower}`,
+        amount: recv.total_amount,
+        date: recv.start_date,
+        payment_method: "transfer",
+        status: "completed",
+        account_id: recv.account_id,
+    });
+
     const { data, error } = await supabase
         .from("receivables")
-        .insert({ ...recv, user_id: userId, total_received: 0, status: "active" })
-        .select()
+        .insert({ ...recv, user_id: userId, total_received: 0, status: "active", transaction_id: tx.id })
+        .select("*, account:accounts(*)")
         .single();
     if (error) throw error;
     return data;
 }
 
-export async function recordReceivablePayment(receivableId: string, amount: number, notes?: string) {
-    const { supabase, userId } = await getSupabaseUser();
+export async function recordReceivablePayment(receivableId: string, amount: number, accountId: string, notes?: string) {
+    const { supabase } = await getSupabaseUser();
     // Get current data
     const { data: recv, error: fetchErr } = await supabase
         .from("receivables")
@@ -993,23 +1011,16 @@ export async function recordReceivablePayment(receivableId: string, amount: numb
         .from("receivables")
         .update({ total_received: newReceived, status: newStatus, updated_at: new Date().toISOString() })
         .eq("id", receivableId)
-        .select()
+        .select("*, account:accounts(*)")
         .single();
     if (error) throw error;
 
     const today = new Date().toISOString().split("T")[0];
 
-    // Log payment
-    await supabase.from("receivable_payments").insert({
-        receivable_id: receivableId,
-        amount,
-        date: today,
-        notes,
-    });
-
-    // Auto-create income transaction so dashboard/reports reflect this cash inflow
-    await supabase.from("transactions").insert({
-        user_id: userId,
+    // Auto-create income transaction lewat addTransaction (bukan insert
+    // manual) supaya account_id ke-set & saldo akun penerima ke-update
+    // konsisten dengan alur transaksi lainnya.
+    const tx = await addTransaction({
         type: "income",
         name: `Piutang Diterima: ${recv.name}`,
         description: notes || `Pembayaran piutang dari ${recv.borrower}`,
@@ -1017,6 +1028,17 @@ export async function recordReceivablePayment(receivableId: string, amount: numb
         date: today,
         payment_method: "transfer",
         status: "completed",
+        account_id: accountId,
+    });
+
+    // Log payment
+    await supabase.from("receivable_payments").insert({
+        receivable_id: receivableId,
+        amount,
+        date: today,
+        notes,
+        account_id: accountId,
+        transaction_id: tx.id,
     });
 
     return data;
@@ -1024,6 +1046,10 @@ export async function recordReceivablePayment(receivableId: string, amount: numb
 
 export async function deleteReceivable(id: string) {
     const { supabase } = await getSupabaseUser();
+    // Catatan: transaksi "receivable_out" & "income" yang udah kebentuk dari
+    // piutang ini TIDAK ikut kehapus — uang emang beneran udah pindah di
+    // masa lalu, jadi riwayat kas di akun tetap harus akurat walau catatan
+    // piutangnya dihapus.
     const { error } = await supabase.from("receivables").delete().eq("id", id);
     if (error) throw error;
 }
@@ -1031,13 +1057,14 @@ export async function deleteReceivable(id: string) {
 export async function updateReceivable(id: string, recv: {
     name: string; borrower: string; total_amount: number;
     start_date: string; due_date: string; priority: string; notes?: string;
+    account_id?: string;
 }) {
     const { supabase } = await getSupabaseUser();
     const { data, error } = await supabase
         .from("receivables")
         .update({ ...recv, updated_at: new Date().toISOString() })
         .eq("id", id)
-        .select()
+        .select("*, account:accounts(*)")
         .single();
     if (error) throw error;
     return data as Receivable;

@@ -1,28 +1,45 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, DollarSign, Loader2 } from "lucide-react";
 import { formatCurrency, cn } from "@/utils";
-import type { Receivable } from "@/types";
+import { getAccounts } from "@/lib/db";
+import { toast } from "sonner";
+import type { Receivable, AccountWithBalance } from "@/types";
 
 interface Props {
   receivable: Receivable;
   onClose: () => void;
-  onConfirm: (amount: number, notes?: string) => void | Promise<void>;
+  onConfirm: (amount: number, accountId: string, notes?: string) => void | Promise<void>;
 }
 
 export function ReceivablePaymentModal({ receivable, onClose, onConfirm }: Props) {
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
+  const [accounts, setAccounts] = useState<AccountWithBalance[]>([]);
+  const [accountId, setAccountId] = useState("");
+
+  useEffect(() => {
+    getAccounts()
+      .then((accs) => {
+        setAccounts(accs);
+        setAccountId(receivable.account_id ?? accs[0]?.id ?? "");
+      })
+      .catch(() => toast.error("Gagal memuat daftar akun"));
+  }, [receivable.account_id]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const val = parseFloat(amount.replace(/\D/g, ""));
     if (!val || val <= 0) return;
+    if (!accountId) {
+      toast.error("Pilih akun tujuan dulu");
+      return;
+    }
     setLoading(true);
     try {
-      await onConfirm(Math.min(val, receivable.remaining), notes || undefined);
+      await onConfirm(Math.min(val, receivable.remaining), accountId, notes || undefined);
     } finally {
       setLoading(false);
     }
@@ -69,6 +86,21 @@ export function ReceivablePaymentModal({ receivable, onClose, onConfirm }: Props
             >
               Isi penuh ({formatCurrency(receivable.remaining)})
             </button>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1.5">Masuk ke Akun *</label>
+            <select
+              className={inputClass}
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              required
+            >
+              <option value="">— Pilih akun —</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
           </div>
 
           <div>

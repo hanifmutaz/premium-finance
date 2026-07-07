@@ -2,7 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useMemo, useEffect } from "react";
-import { Plus, Search, ArrowUpRight, ArrowDownLeft, CreditCard, ArrowLeftRight, PiggyBank, Trash2, Pencil, Wallet } from "lucide-react";
+import { Plus, Search, ArrowUpRight, ArrowDownLeft, CreditCard, ArrowLeftRight, PiggyBank, Trash2, Pencil, Wallet, Handshake } from "lucide-react";
 import { formatCurrency, formatDate, cn } from "@/utils";
 import { StatusBadge } from "@/components/shared/Badges";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -18,6 +18,7 @@ const typeFilters: { label: string; value: TransactionType | "all" }[] = [
   { label: "Pengeluaran", value: "expense" },
   { label: "Bayar Utang", value: "debt_payment" },
   { label: "Tabungan", value: "saving" },
+  { label: "Piutang Keluar", value: "receivable_out" },
 ];
 
 const typeIcon = {
@@ -26,6 +27,7 @@ const typeIcon = {
   debt_payment: <CreditCard size={13} className="text-warning" />,
   transfer: <ArrowLeftRight size={13} className="text-text-secondary" />,
   saving: <PiggyBank size={13} className="text-accent" />,
+  receivable_out: <Handshake size={13} className="text-warning" />,
 };
 
 // "Hari Ini" / "Kemarin" / nama hari lengkap kalau masih minggu ini / tanggal lengkap kalau udah lebih lama.

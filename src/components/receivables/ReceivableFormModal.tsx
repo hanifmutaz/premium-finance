@@ -3,9 +3,9 @@
 import { useState, useEffect } from "react";
 import { X, Loader2 } from "lucide-react";
 import { cn } from "@/utils";
-import { addReceivable, updateReceivable } from "@/lib/db";
+import { addReceivable, updateReceivable, getAccounts } from "@/lib/db";
 import { toast } from "sonner";
-import type { Receivable, ReceivablePriority } from "@/types";
+import type { Receivable, ReceivablePriority, AccountWithBalance } from "@/types";
 
 interface Props {
   onClose: () => void;
@@ -18,6 +18,7 @@ function emptyForm() {
     name: "", borrower: "", total_amount: "",
     start_date: new Date().toISOString().split("T")[0],
     due_date: "", priority: "medium" as ReceivablePriority, notes: "",
+    account_id: "",
   };
 }
 
@@ -25,6 +26,16 @@ export function ReceivableFormModal({ onClose, onAdded, editData }: Props) {
   const isEdit = !!editData;
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState(emptyForm());
+  const [accounts, setAccounts] = useState<AccountWithBalance[]>([]);
+
+  useEffect(() => {
+    getAccounts()
+      .then((accs) => {
+        setAccounts(accs);
+        setForm((f) => (f.account_id ? f : { ...f, account_id: accs[0]?.id ?? "" }));
+      })
+      .catch(() => toast.error("Gagal memuat daftar akun"));
+  }, []);
 
   useEffect(() => {
     if (editData) {
@@ -36,6 +47,7 @@ export function ReceivableFormModal({ onClose, onAdded, editData }: Props) {
         due_date: editData.due_date,
         priority: editData.priority,
         notes: editData.notes ?? "",
+        account_id: editData.account_id ?? "",
       });
     }
   }, [editData]);
@@ -51,25 +63,37 @@ export function ReceivableFormModal({ onClose, onAdded, editData }: Props) {
       toast.error("Nama, peminjam, dan jatuh tempo wajib diisi");
       return;
     }
+    if (!isEdit && !form.account_id) {
+      toast.error("Pilih akun sumber dana dulu");
+      return;
+    }
 
     setLoading(true);
     try {
-      const payload = {
-        name: form.name,
-        borrower: form.borrower,
-        total_amount: amount,
-        start_date: form.start_date,
-        due_date: form.due_date,
-        priority: form.priority,
-        notes: form.notes || undefined,
-      };
-
       if (isEdit && editData) {
-        await updateReceivable(editData.id, payload);
+        await updateReceivable(editData.id, {
+          name: form.name,
+          borrower: form.borrower,
+          total_amount: amount,
+          start_date: form.start_date,
+          due_date: form.due_date,
+          priority: form.priority,
+          notes: form.notes || undefined,
+          account_id: form.account_id || undefined,
+        });
         toast.success("Piutang berhasil diperbarui!");
       } else {
-        await addReceivable(payload);
-        toast.success("Piutang berhasil dicatat!");
+        await addReceivable({
+          name: form.name,
+          borrower: form.borrower,
+          total_amount: amount,
+          start_date: form.start_date,
+          due_date: form.due_date,
+          priority: form.priority,
+          notes: form.notes || undefined,
+          account_id: form.account_id,
+        });
+        toast.success("Piutang berhasil dicatat & saldo akun ke-update!");
       }
       onAdded();
     } catch {
@@ -111,6 +135,30 @@ export function ReceivableFormModal({ onClose, onAdded, editData }: Props) {
             {isEdit && (
               <p className="text-[10px] text-warning mt-1">
                 Mengubah total tidak mengubah riwayat penerimaan yang sudah tercatat.
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="block text-xs text-text-secondary mb-1.5">
+              Akun Sumber Dana {!isEdit && "*"}
+            </label>
+            <select
+              value={form.account_id}
+              onChange={(e) => setForm({ ...form, account_id: e.target.value })}
+              className="w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
+            >
+              <option value="">— Pilih akun —</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+            {!isEdit ? (
+              <p className="text-[10px] text-text-secondary mt-1">
+                Saldo akun ini bakal otomatis berkurang sebesar nominal pinjaman.
+              </p>
+            ) : (
+              <p className="text-[10px] text-warning mt-1">
+                Mengubah akun di sini gak ngubah transaksi pengurangan saldo yang udah tercatat.
               </p>
             )}
           </div>

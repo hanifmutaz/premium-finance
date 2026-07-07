@@ -108,7 +108,10 @@ create table if not exists public.transactions (
   id                uuid primary key default uuid_generate_v4(),
   user_id           uuid references public.profiles(id) on delete cascade not null,
   -- PENTING: 'saving' wajib ada di sini. Lihat catatan FIXES di paling bawah.
-  type              text not null check (type in ('income', 'expense', 'debt_payment', 'transfer', 'saving')),
+  -- 'receivable_out' = piutang keluar (uang dipinjamkan). Diperlakukan kayak
+  -- 'debt_payment': ngurangin saldo akun & kehitung cash-out bulanan, tapi
+  -- gak ikut breakdown kategori pengeluaran.
+  type              text not null check (type in ('income', 'expense', 'debt_payment', 'transfer', 'saving', 'receivable_out')),
   name              text not null,
   description       text,
   category_id       uuid references public.categories(id) on delete set null,
@@ -253,6 +256,10 @@ create table if not exists public.receivables (
   priority        text not null default 'medium' check (priority in ('low', 'medium', 'high')),
   status          text not null default 'active' check (status in ('active', 'completed', 'overdue')),
   notes           text,
+  -- Akun sumber dana waktu piutang dibuat + link ke transaksi
+  -- "receivable_out" yang otomatis kebuat (lihat addReceivable di db.ts).
+  account_id      uuid references public.accounts(id) on delete set null,
+  transaction_id  uuid references public.transactions(id) on delete set null,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
@@ -263,6 +270,9 @@ create table if not exists public.receivable_payments (
   amount          numeric(15, 2) not null check (amount > 0),
   date            date not null default current_date,
   notes           text,
+  -- Akun tujuan tiap pembayaran + link ke transaksi "income" otomatisnya.
+  account_id      uuid references public.accounts(id) on delete set null,
+  transaction_id  uuid references public.transactions(id) on delete set null,
   created_at      timestamptz not null default now()
 );
 
@@ -314,6 +324,8 @@ create index if not exists idx_accounts_user_id         on public.accounts(user_
 create index if not exists idx_recurring_user_id        on public.recurring_transactions(user_id);
 create index if not exists idx_receivables_user_id      on public.receivables(user_id);
 create index if not exists idx_receivables_status       on public.receivables(status);
+create index if not exists idx_receivables_account_id   on public.receivables(account_id);
+create index if not exists idx_receivable_payments_account_id on public.receivable_payments(account_id);
 create index if not exists idx_budgets_user_id          on public.budgets(user_id);
 create index if not exists idx_budget_categories_budget_id on public.budget_categories(budget_id);
 create index if not exists idx_push_subscriptions_user  on public.push_subscriptions(user_id);
@@ -662,5 +674,123 @@ begin
     'created_at', v_tx.created_at, 'updated_at', v_tx.updated_at,
     'category', (select to_jsonb(c) from public.categories c where c.id = v_tx.category_id)
   );
+end;
+$$;
+-- ============================================================
+-- FIX: next_due_date & installments_paid utang cicilan gak pernah
+-- maju, dan overdue check pakai due_date statis (tgl cicilan
+-- PERTAMA) bukan tanggal cicilan yang sebenarnya berikutnya.
+--
+-- Akibat sebelumnya: begitu tgl cicilan pertama lewat, status
+-- debt langsung 'overdue' SELAMANYA walau udah dibayar rutin —
+-- dan karena halaman Utang cuma punya tab Aktif (status=active)
+-- & Lunas (status=completed), debt yang 'overdue' gak nongol di
+-- tab manapun ("ilang").
+--
+-- Aman dijalankan di project yang sudah ada (cuma replace 1
+-- function + trigger, gak ngubah data).
+-- ============================================================
+
+create or replace function public.sync_debt_payment()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_debt              public.debts;
+  v_total_paid        numeric;
+  v_installments_paid integer;
+  v_next_due          date;
+  v_overdue_check     date;
+begin
+  select * into v_debt
+  from public.debts
+  where id = coalesce(new.debt_id, old.debt_id);
+
+  -- Selalu hitung ulang dari nol berdasarkan SUM semua debt_payments,
+  -- bukan nambah/kurang manual — jadi otomatis bener juga buat
+  -- kasus insert, update amount, ATAUPUN delete debt_payments.
+  select coalesce(sum(amount), 0) into v_total_paid
+  from public.debt_payments
+  where debt_id = v_debt.id;
+
+  if v_debt.is_installment and v_debt.installment_amount > 0 then
+    v_installments_paid := floor(v_total_paid / v_debt.installment_amount);
+    if v_debt.tenor_months is not null then
+      v_installments_paid := least(v_installments_paid, v_debt.tenor_months);
+    end if;
+    -- due_date = tgl cicilan PERTAMA. Cicilan berikutnya = +N bulan
+    -- dari situ, N = jumlah cicilan yang udah lunas.
+    v_next_due := (v_debt.due_date + (v_installments_paid * interval '1 month'))::date;
+    v_overdue_check := v_next_due;
+  else
+    v_installments_paid := v_debt.installments_paid;
+    v_next_due := v_debt.next_due_date;
+    v_overdue_check := v_debt.due_date;
+  end if;
+
+  update public.debts
+  set
+    total_paid = v_total_paid,
+    installments_paid = case when v_debt.is_installment then v_installments_paid else installments_paid end,
+    next_due_date = case when v_debt.is_installment then v_next_due else next_due_date end,
+    status = case
+      when v_total_paid >= v_debt.total_amount then 'completed'
+      when v_overdue_check is not null and v_overdue_check < current_date then 'overdue'
+      else 'active'
+    end
+  where id = v_debt.id;
+
+  return coalesce(new, old);
+end;
+$$;
+
+-- Tambahin "or delete" juga (sebelumnya cuma insert/update) — biar
+-- kalau ada debt_payment yang dihapus, total_paid/status ikut
+-- ke-recalculate juga, bukan diem aja kayak sebelumnya.
+drop trigger if exists trg_sync_debt_payment on public.debt_payments;
+create trigger trg_sync_debt_payment
+  after insert or update or delete on public.debt_payments
+  for each row execute procedure public.sync_debt_payment();
+
+-- ─── Backfill: betulin next_due_date & status utang yang udah ada ───────────
+-- Trigger di atas cuma jalan untuk INSERT/UPDATE/DELETE baru di
+-- debt_payments. Biar utang yang SUDAH ada di database ikut
+-- kebenerin sekarang (tanpa nunggu ada pembayaran baru), jalanin ini:
+do $$
+declare
+  d record;
+  v_total_paid numeric;
+  v_installments_paid integer;
+  v_next_due date;
+  v_overdue_check date;
+begin
+  for d in select * from public.debts loop
+    select coalesce(sum(amount), 0) into v_total_paid
+    from public.debt_payments where debt_id = d.id;
+
+    if d.is_installment and d.installment_amount > 0 then
+      v_installments_paid := floor(v_total_paid / d.installment_amount);
+      if d.tenor_months is not null then
+        v_installments_paid := least(v_installments_paid, d.tenor_months);
+      end if;
+      v_next_due := (d.due_date + (v_installments_paid * interval '1 month'))::date;
+      v_overdue_check := v_next_due;
+    else
+      v_installments_paid := d.installments_paid;
+      v_next_due := d.next_due_date;
+      v_overdue_check := d.due_date;
+    end if;
+
+    update public.debts
+    set
+      installments_paid = case when d.is_installment then v_installments_paid else installments_paid end,
+      next_due_date = case when d.is_installment then v_next_due else next_due_date end,
+      status = case
+        when v_total_paid >= d.total_amount then 'completed'
+        when v_overdue_check is not null and v_overdue_check < current_date then 'overdue'
+        else 'active'
+      end
+    where id = d.id;
+  end loop;
 end;
 $$;

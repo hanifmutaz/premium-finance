@@ -21,7 +21,7 @@ export interface Category {
 }
 
 // ─── Transaction ─────────────────────────────────────────────────────────────
-export type TransactionType = "income" | "expense" | "debt_payment" | "transfer" | "saving";
+export type TransactionType = "income" | "expense" | "debt_payment" | "transfer" | "saving" | "receivable_out";
 export type TransactionStatus = "completed" | "pending" | "failed";
 export type PaymentMethod = "cash" | "transfer" | "credit_card" | "debit_card" | "e-wallet" | "other";
 
@@ -239,6 +239,11 @@ export interface Receivable {
   priority: ReceivablePriority;
   status: ReceivableStatus;
   notes?: string;
+  // Akun sumber dana waktu piutang dibuat + transaksi "receivable_out" yang
+  // otomatis kebuat bareng-bareng.
+  account_id?: string;
+  account?: Account;
+  transaction_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -249,6 +254,10 @@ export interface ReceivablePayment {
   amount: number;
   date: string;
   notes?: string;
+  // Akun tujuan pembayaran + transaksi "income" yang otomatis kebuat.
+  account_id?: string;
+  account?: Account;
+  transaction_id?: string;
   created_at: string;
 }
 

@@ -48,10 +48,10 @@ export default function ReceivablesPage() {
   const totalReceived = receivables.reduce((s, r) => s + Number(r.total_received), 0);
   const overdueCount = active.filter((r) => daysUntil(r.due_date) < 0).length;
 
-  async function handlePaymentRecorded(id: string, amount: number, notes?: string) {
+  async function handlePaymentRecorded(id: string, amount: number, accountId: string, notes?: string) {
     try {
-      await recordReceivablePayment(id, amount, notes);
-      toast.success("Pembayaran piutang dicatat!");
+      await recordReceivablePayment(id, amount, accountId, notes);
+      toast.success("Pembayaran piutang dicatat & saldo akun ke-update!");
       setCollectId(null);
       load();
     } catch {
@@ -182,6 +182,9 @@ export default function ReceivablesPage() {
                       </div>
                       <p className="text-xs text-text-secondary mt-0.5">
                         Peminjam: <span className="text-text-primary font-medium">{recv.borrower}</span>
+                        {recv.account?.name && (
+                          <span className="ml-1.5 text-accent">· dari {recv.account.name}</span>
+                        )}
                       </p>
                       <p className="text-xs text-text-secondary mt-0.5">
                         Jatuh tempo: {formatDate(recv.due_date)}
@@ -251,7 +254,7 @@ export default function ReceivablesPage() {
         <ReceivablePaymentModal
           receivable={collectId}
           onClose={() => setCollectId(null)}
-          onConfirm={(amount, notes) => handlePaymentRecorded(collectId.id, amount, notes)}
+          onConfirm={(amount, accountId, notes) => handlePaymentRecorded(collectId.id, amount, accountId, notes)}
         />
       )}
       <ConfirmDialog
