@@ -8,13 +8,17 @@ import {
 } from "recharts";
 import { FileDown, FileSpreadsheet, Download, Loader2 } from "lucide-react";
 import { formatCurrency, cn } from "@/utils";
-import { getTransactions, getMonthlyChartData } from "@/lib/db";
+import { getTransactions, getMonthlyChartData, getExpenseByAccount } from "@/lib/db";
 import { exportToExcel, exportToPDF, exportToCSV } from "@/lib/export";
 import { toast } from "sonner";
 import type { Transaction, MonthlyChartData } from "@/types";
 
 const PERIOD_TABS = ["Bulanan", "Tahunan"] as const;
 const PIE_COLORS = ["#64748B", "#475569", "#94A3B8", "#334155", "#1E293B", "#273449"];
+const MONTH_NAMES = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+];
 
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
@@ -32,55 +36,66 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 export default function ReportsPage() {
+  const now = new Date();
   const [period, setPeriod] = useState<typeof PERIOD_TABS[number]>("Bulanan");
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth()); // 0-indexed
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
   const [monthlyData, setMonthlyData] = useState<MonthlyChartData[]>([]);
+  const [accountBreakdown, setAccountBreakdown] = useState<{ account_id: string | null; name: string; color: string | null; value: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<"pdf" | "excel" | "csv" | null>(null);
 
   useEffect(() => {
     async function load() {
+      setLoading(true);
       try {
-        const [txs, monthly] = await Promise.all([
-          getTransactions({ limit: 500 }),
-          getMonthlyChartData(),
+        const dateFrom = period === "Bulanan"
+          ? new Date(year, month, 1).toISOString().split("T")[0]
+          : new Date(year, 0, 1).toISOString().split("T")[0];
+        const dateTo = period === "Bulanan"
+          ? new Date(year, month + 1, 0).toISOString().split("T")[0]
+          : new Date(year, 11, 31).toISOString().split("T")[0];
+
+        const [txs, monthly, byAccount] = await Promise.all([
+          getTransactions({ limit: 2000, dateFrom, dateTo }),
+          getMonthlyChartData(year, month),
+          getExpenseByAccount(year, month),
         ]);
         setAllTransactions(txs);
         setMonthlyData(monthly);
+        setAccountBreakdown(byAccount);
       } catch { toast.error("Gagal memuat laporan"); }
       finally { setLoading(false); }
     }
     load();
-  }, []);
+  }, [year, month, period]);
 
-  // Filter transactions based on selected period (Bulanan = current month, Tahunan = current year)
+  // Filter transactions based on selected period (Bulanan = bulan+tahun terpilih, Tahunan = tahun terpilih)
   const transactions = useMemo(() => {
-    const now = new Date();
     if (period === "Bulanan") {
       return allTransactions.filter((tx) => {
         const d = new Date(tx.date);
-        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+        return d.getFullYear() === year && d.getMonth() === month;
       });
     }
-    // Tahunan: current year
-    return allTransactions.filter((tx) => new Date(tx.date).getFullYear() === now.getFullYear());
-  }, [allTransactions, period]);
+    return allTransactions.filter((tx) => new Date(tx.date).getFullYear() === year);
+  }, [allTransactions, period, year, month]);
 
-  // Yearly chart data: aggregate allTransactions by month for current year
+  // Yearly chart data: aggregate allTransactions by month for selected year
   const yearlyData = useMemo(() => {
-    const now = new Date();
     const months = Array.from({ length: 12 }, (_, i) => {
-      const monthName = new Date(now.getFullYear(), i, 1).toLocaleString("id-ID", { month: "short" });
+      const monthName = new Date(year, i, 1).toLocaleString("id-ID", { month: "short" });
       const monthTxs = allTransactions.filter((tx) => {
         const d = new Date(tx.date);
-        return d.getFullYear() === now.getFullYear() && d.getMonth() === i;
+        return d.getFullYear() === year && d.getMonth() === i;
       });
       const income = monthTxs.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
       const expense = monthTxs.filter((t) => t.type !== "income").reduce((s, t) => s + t.amount, 0);
       return { month: monthName, income, expense, balance: income - expense };
     });
     return months;
-  }, [allTransactions]);
+  }, [allTransactions, year]);
 
   const chartData = period === "Bulanan" ? monthlyData : yearlyData;
 
@@ -99,13 +114,41 @@ export default function ReportsPage() {
     return Object.entries(map).map(([name, value]) => ({ name, value }));
   }, [transactions]);
 
-  const periodLabel = useMemo(() => {
-    const now = new Date();
+  // Breakdown per akun cuma relevan buat tampilan "Bulanan" (getExpenseByAccount
+  // dari backend query 1 bulan spesifik). Buat "Tahunan", turunin dari
+  // allTransactions yang udah ke-fetch biar gak nambah round-trip lagi.
+  const accountData = useMemo(() => {
     if (period === "Bulanan") {
-      return now.toLocaleString("id-ID", { month: "long", year: "numeric" });
+      const total = accountBreakdown.reduce((s, a) => s + a.value, 0);
+      return accountBreakdown.map((a) => ({ ...a, percent: total > 0 ? (a.value / total) * 100 : 0 }));
     }
-    return `Tahun ${now.getFullYear()}`;
-  }, [period]);
+    const map: Record<string, { name: string; color: string | null; value: number }> = {};
+    transactions.filter((t) => t.type === "expense").forEach((t) => {
+      const key = t.account_id ?? "none";
+      const name = t.account?.name ?? "Tanpa Akun";
+      const color = t.account?.color ?? null;
+      if (!map[key]) map[key] = { name, color, value: 0 };
+      map[key].value += t.amount;
+    });
+    const list = Object.entries(map)
+      .map(([account_id, v]) => ({ account_id: account_id === "none" ? null : account_id, ...v }))
+      .sort((a, b) => b.value - a.value);
+    const total = list.reduce((s, a) => s + a.value, 0);
+    return list.map((a) => ({ ...a, percent: total > 0 ? (a.value / total) * 100 : 0 }));
+  }, [period, accountBreakdown, transactions]);
+
+  const periodLabel = useMemo(() => {
+    if (period === "Bulanan") {
+      return `${MONTH_NAMES[month]} ${year}`;
+    }
+    return `Tahun ${year}`;
+  }, [period, year, month]);
+
+  function goToCurrentPeriod() {
+    setYear(now.getFullYear());
+    setMonth(now.getMonth());
+  }
+  const isCurrentPeriod = year === now.getFullYear() && (period === "Tahunan" || month === now.getMonth());
 
   async function handleExport(type: "pdf" | "excel" | "csv") {
     if (transactions.length === 0) {
@@ -153,15 +196,44 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      <div className="flex gap-1 border-b border-border">
-        {PERIOD_TABS.map((tab) => (
-          <button key={tab} onClick={() => setPeriod(tab)}
-            className={cn("px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors",
-              period === tab ? "border-text-primary text-text-primary" : "border-transparent text-text-secondary hover:text-text-primary"
-            )}>
-            {tab}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-0">
+        <div className="flex gap-1">
+          {PERIOD_TABS.map((tab) => (
+            <button key={tab} onClick={() => setPeriod(tab)}
+              className={cn("px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors",
+                period === tab ? "border-text-primary text-text-primary" : "border-transparent text-text-secondary hover:text-text-primary"
+              )}>
+              {tab}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 pb-2">
+          {period === "Bulanan" && (
+            <select
+              value={month}
+              onChange={(e) => setMonth(Number(e.target.value))}
+              className="bg-input border border-border rounded-md px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent transition-colors"
+            >
+              {MONTH_NAMES.map((name, i) => (
+                <option key={name} value={i}>{name}</option>
+              ))}
+            </select>
+          )}
+          <select
+            value={year}
+            onChange={(e) => setYear(Number(e.target.value))}
+            className="bg-input border border-border rounded-md px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:border-accent transition-colors"
+          >
+            {Array.from({ length: 6 }, (_, i) => now.getFullYear() - i).map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+          {!isCurrentPeriod && (
+            <button onClick={goToCurrentPeriod} className="text-xs text-accent hover:text-text-primary transition-colors px-1">
+              Kembali ke {period === "Bulanan" ? "bulan" : "tahun"} ini
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -188,7 +260,7 @@ export default function ReportsPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="card-base p-5">
               <h3 className="text-sm font-semibold text-text-primary mb-1">Income vs Expense</h3>
-              <p className="text-xs text-text-secondary mb-4">{period === "Bulanan" ? "6 bulan terakhir" : `Sepanjang tahun ${new Date().getFullYear()}`}</p>
+              <p className="text-xs text-text-secondary mb-4">{period === "Bulanan" ? `6 bulan terakhir s/d ${MONTH_NAMES[month]} ${year}` : `Sepanjang tahun ${year}`}</p>
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={chartData} barCategoryGap="30%">
                   <CartesianGrid vertical={false} stroke="#334155" strokeDasharray="3 3" />
@@ -233,6 +305,34 @@ export default function ReportsPage() {
             )}
           </div>
 
+          {accountData.length > 0 && (
+            <div className="card-base p-5">
+              <h3 className="text-sm font-semibold text-text-primary mb-1">Pengeluaran per Akun</h3>
+              <p className="text-xs text-text-secondary mb-4">Dari mana aja uang paling banyak kepake — {periodLabel}</p>
+              <div className="space-y-3">
+                {accountData.map((acc) => (
+                  <div key={acc.account_id ?? "none"}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: acc.color || "#64748B" }} />
+                        <span className="text-xs font-medium text-text-primary">{acc.name}</span>
+                      </div>
+                      <span className="text-xs text-text-secondary tabular-nums">
+                        {formatCurrency(acc.value, true)} · {Math.round(acc.percent)}%
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 bg-surface rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-700"
+                        style={{ width: `${acc.percent}%`, backgroundColor: acc.color || "#64748B" }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {transactions.length > 0 ? (
             <div className="card-base">
               <div className="px-5 py-4 border-b border-border flex items-center justify-between">
@@ -243,7 +343,7 @@ export default function ReportsPage() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-border">
-                      {["Tanggal", "Nama", "Kategori", "Metode", "Nominal"].map((h) => (
+                      {["Tanggal", "Nama", "Kategori", "Akun", "Metode", "Nominal"].map((h) => (
                         <th key={h} className="px-5 py-3 text-left text-[10px] text-accent uppercase tracking-widest font-semibold">{h}</th>
                       ))}
                     </tr>
@@ -254,6 +354,7 @@ export default function ReportsPage() {
                         <td className="px-5 py-3 text-xs text-text-secondary tabular-nums whitespace-nowrap">{tx.date}</td>
                         <td className="px-5 py-3 text-sm text-text-primary">{tx.name}</td>
                         <td className="px-5 py-3 text-xs text-text-secondary">{tx.category?.name ?? "—"}</td>
+                        <td className="px-5 py-3 text-xs text-text-secondary">{tx.account?.name ?? "—"}</td>
                         <td className="px-5 py-3 text-xs text-text-secondary capitalize">{tx.payment_method.replace("_", " ")}</td>
                         <td className={cn("px-5 py-3 text-sm font-semibold tabular-nums text-right",
                           tx.type === "income" ? "text-success" : "text-text-primary"

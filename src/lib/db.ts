@@ -44,7 +44,7 @@ export async function seedDefaultCategories(userId: string) {
 }
 
 // ─── Transactions ─────────────────────────────────────────────────────────────
-export async function getTransactions(filters?: { type?: string; search?: string; accountId?: string; limit?: number }) {
+export async function getTransactions(filters?: { type?: string; search?: string; accountId?: string; limit?: number; dateFrom?: string; dateTo?: string }) {
     const { supabase, userId } = await getSupabaseUser();
     // Embed akun lewat nama constraint FK (transactions punya 2 FK ke accounts:
     // account_id & to_account_id), jadi PostgREST butuh disambiguasi eksplisit.
@@ -68,6 +68,8 @@ export async function getTransactions(filters?: { type?: string; search?: string
     if (filters?.type && filters.type !== "all") query = query.eq("type", filters.type);
     if (filters?.accountId && filters.accountId !== "all") query = query.eq("account_id", filters.accountId);
     if (filters?.search) query = query.ilike("name", `%${filters.search}%`);
+    if (filters?.dateFrom) query = query.gte("date", filters.dateFrom);
+    if (filters?.dateTo) query = query.lte("date", filters.dateTo);
 
     const { data, error } = await query;
     if (error) throw error;
@@ -705,14 +707,19 @@ export async function deleteCategory(id: string) {
 }
 
 // ─── Dashboard stats ──────────────────────────────────────────────────────────
-export async function getDashboardStats() {
+export async function getDashboardStats(year?: number, month?: number) {
     const { supabase, userId } = await getSupabaseUser();
 
+    // month di sini 0-indexed (samain sama Date#getMonth()) biar konsisten
+    // sama sisa fungsi lain di file ini. Default: bulan berjalan.
     const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split("T")[0];
+    const y = year ?? now.getFullYear();
+    const m = month ?? now.getMonth();
 
-    const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const firstDay = new Date(y, m, 1).toISOString().split("T")[0];
+    const lastDay = new Date(y, m + 1, 0).toISOString().split("T")[0];
+
+    const prevMonth = new Date(y, m - 1, 1);
     const prevFirstDay = new Date(prevMonth.getFullYear(), prevMonth.getMonth(), 1).toISOString().split("T")[0];
     const prevLastDay = new Date(prevMonth.getFullYear(), prevMonth.getMonth() + 1, 0).toISOString().split("T")[0];
 
@@ -779,13 +786,15 @@ export async function getDashboardStats() {
 }
 
 // ─── Monthly chart data ───────────────────────────────────────────────────────
-export async function getMonthlyChartData() {
+export async function getMonthlyChartData(endYear?: number, endMonth?: number) {
     const { supabase, userId } = await getSupabaseUser();
     const months = [];
 
+    const now = new Date();
+    const anchor = new Date(endYear ?? now.getFullYear(), endMonth ?? now.getMonth(), 1);
+
     for (let i = 5; i >= 0; i--) {
-        const d = new Date();
-        d.setMonth(d.getMonth() - i);
+        const d = new Date(anchor.getFullYear(), anchor.getMonth() - i, 1);
         const firstDay = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split("T")[0];
         const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split("T")[0];
         const monthName = d.toLocaleString("id-ID", { month: "short" });
@@ -1060,6 +1069,23 @@ export async function updateReceivable(id: string, recv: {
     account_id?: string;
 }) {
     const { supabase } = await getSupabaseUser();
+
+    // Ambil data lama dulu buat tau apa yang berubah & buat validasi.
+    const { data: existing, error: fetchErr } = await supabase
+        .from("receivables")
+        .select("*")
+        .eq("id", id)
+        .single();
+    if (fetchErr) throw fetchErr;
+
+    // Nominal gak boleh diturunin di bawah yang udah kebayar — bakal bikin
+    // total_received > total_amount (piutang "lunas lebih").
+    if (recv.total_amount < Number(existing.total_received)) {
+        throw new Error(
+            `Nominal gak boleh kurang dari Rp${Number(existing.total_received).toLocaleString("id-ID")} yang udah diterima`
+        );
+    }
+
     const { data, error } = await supabase
         .from("receivables")
         .update({ ...recv, updated_at: new Date().toISOString() })
@@ -1067,6 +1093,27 @@ export async function updateReceivable(id: string, recv: {
         .select("*, account:accounts(*)")
         .single();
     if (error) throw error;
+
+    // Auto-sync transaksi "receivable_out" yang nempel, kalau nominal, akun,
+    // atau tanggalnya berubah — biar saldo akun & catatan piutang tetap
+    // konsisten satu sama lain.
+    if (existing.transaction_id) {
+        const amountChanged = Number(recv.total_amount) !== Number(existing.total_amount);
+        const accountChanged = !!recv.account_id && recv.account_id !== existing.account_id;
+        const dateChanged = recv.start_date !== existing.start_date;
+        const nameChanged = recv.name !== existing.name || recv.borrower !== existing.borrower;
+
+        if (amountChanged || accountChanged || dateChanged || nameChanged) {
+            await updateTransaction(existing.transaction_id, {
+                amount: recv.total_amount,
+                account_id: recv.account_id,
+                date: recv.start_date,
+                name: `Piutang: ${recv.name}`,
+                description: `Dipinjamkan ke ${recv.borrower}`,
+            });
+        }
+    }
+
     return data as Receivable;
 }
 
@@ -1327,20 +1374,25 @@ export async function subscribeToNotifications(
 // Dashboard sebelumnya bikin pie chart kategori dari `getTransactions({limit:10})`
 // (query yang sebenarnya buat list "Transaksi Terakhir"), jadi misleading kalau
 // user punya >10 transaksi sebulan. Ini query langsung semua expense bulan ini.
-export async function getCategoryBreakdown(): Promise<{ name: string; value: number }[]> {
+export async function getCategoryBreakdown(year?: number, month?: number, accountId?: string): Promise<{ name: string; value: number }[]> {
     const { supabase, userId } = await getSupabaseUser();
 
     const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
-    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split("T")[0];
+    const y = year ?? now.getFullYear();
+    const m = month ?? now.getMonth();
+    const firstDay = new Date(y, m, 1).toISOString().split("T")[0];
+    const lastDay = new Date(y, m + 1, 0).toISOString().split("T")[0];
 
-    const { data, error } = await supabase
+    let query = supabase
         .from("transactions")
         .select("amount, category:categories(name)")
         .eq("user_id", userId)
         .eq("type", "expense")
         .gte("date", firstDay)
         .lte("date", lastDay);
+    if (accountId) query = query.eq("account_id", accountId);
+
+    const { data, error } = await query;
     if (error) throw error;
 
     const map: Record<string, number> = {};
@@ -1350,6 +1402,41 @@ export async function getCategoryBreakdown(): Promise<{ name: string; value: num
     });
 
     return Object.entries(map).map(([name, value]) => ({ name, value }));
+}
+
+// Breakdown pengeluaran (type = "expense") per akun, buat satu bulan tertentu.
+// Dipakai di halaman Laporan biar keliatan dari akun mana aja uang paling
+// banyak kepake di bulan itu.
+export async function getExpenseByAccount(year?: number, month?: number): Promise<{ account_id: string | null; name: string; color: string | null; value: number }[]> {
+    const { supabase, userId } = await getSupabaseUser();
+
+    const now = new Date();
+    const y = year ?? now.getFullYear();
+    const m = month ?? now.getMonth();
+    const firstDay = new Date(y, m, 1).toISOString().split("T")[0];
+    const lastDay = new Date(y, m + 1, 0).toISOString().split("T")[0];
+
+    const { data, error } = await supabase
+        .from("transactions")
+        .select("amount, account_id, account:accounts!transactions_account_id_fkey(name, color)")
+        .eq("user_id", userId)
+        .eq("type", "expense")
+        .gte("date", firstDay)
+        .lte("date", lastDay);
+    if (error) throw error;
+
+    const map: Record<string, { name: string; color: string | null; value: number }> = {};
+    ((data ?? []) as any[]).forEach((t) => {
+        const key = t.account_id ?? "none";
+        const name = t.account?.name ?? "Tanpa Akun";
+        const color = t.account?.color ?? null;
+        if (!map[key]) map[key] = { name, color, value: 0 };
+        map[key].value += Number(t.amount);
+    });
+
+    return Object.entries(map)
+        .map(([account_id, v]) => ({ account_id: account_id === "none" ? null : account_id, ...v }))
+        .sort((a, b) => b.value - a.value);
 }
 
 // ─── Global Search ──────────────────────────────────────────────────────────

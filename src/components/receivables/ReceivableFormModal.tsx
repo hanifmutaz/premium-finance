@@ -96,8 +96,9 @@ export function ReceivableFormModal({ onClose, onAdded, editData }: Props) {
         toast.success("Piutang berhasil dicatat & saldo akun ke-update!");
       }
       onAdded();
-    } catch {
-      toast.error(isEdit ? "Gagal memperbarui piutang" : "Gagal menyimpan piutang");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : undefined;
+      toast.error(msg || (isEdit ? "Gagal memperbarui piutang" : "Gagal menyimpan piutang"));
     } finally {
       setLoading(false);
     }
@@ -134,7 +135,7 @@ export function ReceivableFormModal({ onClose, onAdded, editData }: Props) {
             </div>
             {isEdit && (
               <p className="text-[10px] text-warning mt-1">
-                Mengubah total tidak mengubah riwayat penerimaan yang sudah tercatat.
+                Mengubah total otomatis nyesuain transaksi pengurangan saldo, tapi gak bisa di bawah nominal yang udah diterima.
               </p>
             )}
           </div>
@@ -158,7 +159,7 @@ export function ReceivableFormModal({ onClose, onAdded, editData }: Props) {
               </p>
             ) : (
               <p className="text-[10px] text-warning mt-1">
-                Mengubah akun di sini gak ngubah transaksi pengurangan saldo yang udah tercatat.
+                Mengubah akun otomatis mindahin transaksi pengurangan saldo ke akun baru ini.
               </p>
             )}
           </div>

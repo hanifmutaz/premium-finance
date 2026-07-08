@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { DashboardStatCards } from "@/components/dashboard/StatCards";
 import { IncomeExpenseChart, BalanceTrendChart, DebtTrendChart, CategoryPieChart } from "@/components/dashboard/Charts";
 import { DebtOverviewWidget } from "@/components/dashboard/DebtOverview";
@@ -14,7 +14,17 @@ import { calculateHealthScore } from "@/lib/calculations";
 import type { DashboardStats, MonthlyChartData, Debt, Goal, Transaction } from "@/types";
 import type { SavingsOverview } from "@/lib/db";
 
+const MONTH_NAMES = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+];
+
 export default function DashboardPage() {
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth()); // 0-indexed
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
+
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyChartData[]>([]);
   const [debts, setDebts] = useState<Debt[]>([]);
@@ -26,47 +36,52 @@ export default function DashboardPage() {
   const [cumulativeSavings, setCumulativeSavings] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [s, m, d, g, t, dt, cb, sv, cs] = await Promise.all([
-          getDashboardStats(),
-          getMonthlyChartData(),
-          getDebts(),
-          getGoals(),
-          getTransactions({ limit: 10 }),
-          getDebtTrendData(),
-          getCategoryBreakdown(),
-          getSavingsOverview(),
-          getCumulativeSavings(),
-        ]);
+  const load = useCallback(async (y: number, m: number) => {
+    setLoading(true);
+    try {
+      const [s, mc, d, g, t, dt, cb, sv, cs] = await Promise.all([
+        getDashboardStats(y, m),
+        getMonthlyChartData(y, m),
+        getDebts(),
+        getGoals(),
+        getTransactions({ limit: 10 }),
+        getDebtTrendData(),
+        getCategoryBreakdown(y, m),
+        getSavingsOverview(),
+        getCumulativeSavings(),
+      ]);
 
-        // Calculate health score
-        const healthScore = calculateHealthScore({
-          monthlyIncome: s.monthly_income,
-          monthlyExpense: s.monthly_expense,
-          totalDebt: s.total_active_debt,
-          monthlySavings: Math.max(0, s.monthly_income - s.monthly_expense),
-          goals: g,
-        });
+      // Calculate health score
+      const healthScore = calculateHealthScore({
+        monthlyIncome: s.monthly_income,
+        monthlyExpense: s.monthly_expense,
+        totalDebt: s.total_active_debt,
+        monthlySavings: Math.max(0, s.monthly_income - s.monthly_expense),
+        goals: g,
+      });
 
-        setStats({ ...s, health_score: healthScore });
-        setMonthlyData(m);
-        setDebts(d);
-        setGoals(g);
-        setTransactions(t);
-        setDebtTrend(dt);
-        setCategoryData(cb.map((c) => ({ ...c, color: "#64748B" })));
-        setSavings(sv);
-        setCumulativeSavings(cs);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
+      setStats({ ...s, health_score: healthScore });
+      setMonthlyData(mc);
+      setDebts(d);
+      setGoals(g);
+      setTransactions(t);
+      setDebtTrend(dt);
+      setCategoryData(cb.map((c) => ({ ...c, color: "#64748B" })));
+      setSavings(sv);
+      setCumulativeSavings(cs);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-    load();
   }, []);
+
+  useEffect(() => { load(year, month); }, [load, year, month]);
+
+  function goToCurrentMonth() {
+    setYear(now.getFullYear());
+    setMonth(now.getMonth());
+  }
 
   if (loading) {
     return (
@@ -90,6 +105,42 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <select
+            value={month}
+            onChange={(e) => setMonth(Number(e.target.value))}
+            className="bg-input border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
+          >
+            {MONTH_NAMES.map((name, i) => (
+              <option key={name} value={i}>{name}</option>
+            ))}
+          </select>
+          <select
+            value={year}
+            onChange={(e) => setYear(Number(e.target.value))}
+            className="bg-input border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-accent transition-colors"
+          >
+            {Array.from({ length: 6 }, (_, i) => now.getFullYear() - i).map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
+          {!isCurrentMonth && (
+            <button
+              onClick={goToCurrentMonth}
+              className="text-xs text-accent hover:text-text-primary transition-colors px-2 py-1"
+            >
+              Kembali ke bulan ini
+            </button>
+          )}
+        </div>
+        {!isCurrentMonth && (
+          <span className="text-xs text-warning bg-warning/10 px-2.5 py-1 rounded-md">
+            Nampilin data {MONTH_NAMES[month]} {year} (backdate)
+          </span>
+        )}
+      </div>
+
       <DashboardStatCards stats={stats} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
