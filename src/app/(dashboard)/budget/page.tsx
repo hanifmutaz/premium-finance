@@ -4,14 +4,14 @@ export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
 import {
   Plus, Calendar, CalendarDays, TrendingUp, TrendingDown,
-  Target, ChevronDown, ChevronUp, Pencil, Trash2, AlertCircle, CheckCircle2, Link2,
+  Target, ChevronDown, ChevronUp, Pencil, Trash2, AlertCircle, CheckCircle2, Link2, RefreshCw,
 } from "lucide-react";
 import { formatCurrency, calculateProgress, cn } from "@/utils";
 import { ProgressBar } from "@/components/shared/ProgressBar";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { BudgetFormModal } from "@/components/budget/BudgetFormModal";
-import { getBudgets, deleteBudget } from "@/lib/db";
+import { getBudgets, deleteBudget, recalculateBudgetActual } from "@/lib/db";
 import { toast } from "sonner";
 import type { Budget } from "@/types";
 
@@ -23,6 +23,7 @@ export default function BudgetPage() {
   const [showForm, setShowForm] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editData, setEditData] = useState<Budget | null>(null);
+  const [resyncingId, setResyncingId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -68,6 +69,19 @@ export default function BudgetPage() {
       load();
     } catch {
       toast.error("Gagal menghapus budget");
+    }
+  }
+
+  async function handleResync(id: string) {
+    setResyncingId(id);
+    try {
+      await recalculateBudgetActual(id);
+      toast.success("Realisasi budget disinkronkan ulang dari histori transaksi");
+      await load();
+    } catch {
+      toast.error("Gagal sinkronkan ulang");
+    } finally {
+      setResyncingId(null);
     }
   }
 
@@ -176,6 +190,14 @@ export default function BudgetPage() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleResync(budget.id); }}
+                        title="Sinkronkan ulang realisasi dari histori transaksi"
+                        disabled={resyncingId === budget.id}
+                        className="p-1.5 text-accent hover:text-text-primary transition-colors rounded disabled:opacity-50"
+                      >
+                        <RefreshCw size={13} className={cn(resyncingId === budget.id && "animate-spin")} />
+                      </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); openEdit(budget); }}
                         className="p-1.5 text-accent hover:text-text-primary transition-colors rounded"
