@@ -367,7 +367,7 @@ export async function deleteTransaction(id: string) {
     const { error } = await supabase.from("transactions").delete().eq("id", id);
     if (error) throw error;
 
-    if (tx && (tx.type === "expense" || tx.type === "debt_payment")) {
+    if (tx && (tx.type === "expense" || tx.type === "debt_payment" || tx.type === "saving")) {
         await syncBudgetActual(userId, tx.category?.name ?? "", -Number(tx.amount), tx.date, null, tx.category_id ?? null, tx.name ?? null);
     }
 
@@ -400,11 +400,11 @@ export async function updateTransaction(
         .single();
     if (error) throw error;
 
-    // Reverse old sync, then apply new sync (relevant for expense & debt_payment)
-    if (original && (original.type === "expense" || original.type === "debt_payment")) {
+    // Reverse old sync, then apply new sync (relevant for expense, debt_payment & saving)
+    if (original && (original.type === "expense" || original.type === "debt_payment" || original.type === "saving")) {
         await syncBudgetActual(userId, original.category?.name ?? "", -Number(original.amount), original.date, null, original.category_id ?? null, original.name ?? null);
     }
-    if (data.type === "expense" || data.type === "debt_payment") {
+    if (data.type === "expense" || data.type === "debt_payment" || data.type === "saving") {
         await syncBudgetActual(userId, data.category?.name ?? "", Number(data.amount), data.date, null, data.category_id ?? null, data.name ?? null);
     }
 

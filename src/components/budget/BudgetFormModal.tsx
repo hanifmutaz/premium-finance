@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Plus, Trash2, Loader2, Link2, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { X, Plus, Trash2, Loader2, Link2, AlertCircle } from "lucide-react";
 import { cn } from "@/utils";
 import { addBudget, updateBudget, getBudgets, getCategories } from "@/lib/db";
 import { toast } from "sonner";
@@ -35,7 +35,6 @@ interface CatRow {
   color: string;
   mapped_category_ids: string[];
   keyword_filter: string;
-  showMapping: boolean; // UI state, tidak disimpan ke DB
 }
 
 interface Props {
@@ -50,8 +49,34 @@ function presetCats(period: BudgetPeriod): CatRow[] {
     .map((n, i) => ({
       name: n, planned_amount: "", actual_amount: 0,
       color: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
-      mapped_category_ids: [], keyword_filter: "", showMapping: false,
+      mapped_category_ids: [], keyword_filter: "",
     }));
+}
+
+// Auto-mapping preset ke kategori transaksi yang beneran ada, berdasar
+// kata kunci yang lazim dipakai — biar preset gak lahir dalam keadaan
+// "kosongan" (gak mapping apa-apa) begitu kategori transaksi kedetect.
+const PRESET_AUTO_MAP: Record<string, string[]> = {
+  "makan & minum": ["makan"],
+  "makan harian": ["makan"],
+  transport: ["transport"],
+  belanja: ["belanja"],
+  "bayar utang": ["utang", "debt", "cicilan"],
+  tabungan: ["investasi", "tabungan"],
+  "tabungan minggu": ["investasi", "tabungan"],
+};
+
+function autoMapPresets(cats: CatRow[], txCategories: TxCategory[]): CatRow[] {
+  return cats.map((c) => {
+    if (c.mapped_category_ids.length > 0) return c; // udah ada mapping manual, jangan timpa
+    const keywords = PRESET_AUTO_MAP[c.name.toLowerCase()];
+    if (!keywords) return c;
+    const matches = txCategories.filter((tc) =>
+      keywords.some((kw) => tc.name.toLowerCase().includes(kw))
+    );
+    if (matches.length === 0) return c;
+    return { ...c, mapped_category_ids: matches.map((m) => m.id) };
+  });
 }
 
 export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: Props) {
@@ -79,6 +104,13 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
   useEffect(() => {
     getCategories("expense").then(setTxCategories).catch(() => { });
   }, []);
+
+  // Begitu kategori transaksi ke-load, coba auto-mapping preset yang belum
+  // di-mapping manual — biar user gak mulai dari kategori kosongan.
+  useEffect(() => {
+    if (isEdit || txCategories.length === 0) return;
+    setCategories((prev) => autoMapPresets(prev, txCategories));
+  }, [txCategories, isEdit]);
 
   useEffect(() => {
     if (period === "weekly" && !isEdit) {
@@ -120,7 +152,6 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
       color: c.color ?? CATEGORY_COLORS[i % CATEGORY_COLORS.length],
       mapped_category_ids: (c.mapped_category_ids as string[]) ?? [],
       keyword_filter: c.keyword_filter ?? "",
-      showMapping: !!((c.mapped_category_ids as string[])?.length),
     })));
   }, [editData]);
 
@@ -142,7 +173,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
     setCategories((prev) => [...prev, {
       name: "", planned_amount: "", actual_amount: 0,
       color: CATEGORY_COLORS[prev.length % CATEGORY_COLORS.length],
-      mapped_category_ids: [], keyword_filter: "", showMapping: false,
+      mapped_category_ids: [], keyword_filter: "",
     }]);
   }
 
@@ -152,10 +183,6 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
 
   function updateCat<K extends keyof CatRow>(idx: number, field: K, value: CatRow[K]) {
     setCategories((prev) => prev.map((c, i) => i === idx ? { ...c, [field]: value } : c));
-  }
-
-  function toggleMapping(idx: number) {
-    setCategories((prev) => prev.map((c, i) => i === idx ? { ...c, showMapping: !c.showMapping } : c));
   }
 
   function toggleMappedCat(catIdx: number, txCatId: string) {
@@ -183,6 +210,15 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
     const cats = categories.filter((c) => c.name && parseFloat(c.planned_amount) > 0);
     if (cats.length === 0) { toast.error("Tambahkan minimal 1 kategori dengan nominal"); return; }
     if (!totalIncome || income <= 0) { toast.error("Total pemasukan wajib diisi"); return; }
+
+    const unmapped = cats.filter((c) => c.mapped_category_ids.length === 0 && !c.keyword_filter);
+    if (unmapped.length > 0) {
+      const proceed = window.confirm(
+        `${unmapped.length} kategori (${unmapped.map((c) => c.name).join(", ")}) belum di-mapping ke kategori transaksi. ` +
+        `Transaksi gak akan otomatis masuk ke kategori ini. Lanjut simpan tanpa mapping?`
+      );
+      if (!proceed) return;
+    }
 
     setLoading(true);
     try {
@@ -370,82 +406,64 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
                     <input className={cn(ic, "w-32 border-0 bg-transparent px-1 focus:bg-surface rounded")}
                       type="number" min="0" placeholder="Rp" value={cat.planned_amount}
                       onChange={(e) => updateCat(idx, "planned_amount", e.target.value)} />
-                    {/* Tombol mapping */}
-                    <button type="button" onClick={() => toggleMapping(idx)}
-                      title="Set mapping kategori transaksi"
-                      className={cn("p-1 rounded transition-colors shrink-0",
-                        cat.showMapping || cat.mapped_category_ids.length > 0
-                          ? "text-text-primary" : "text-accent hover:text-text-primary")}>
-                      {cat.showMapping ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                    </button>
                     <button type="button" onClick={() => removeCategory(idx)}
                       className="text-accent hover:text-danger transition-colors shrink-0">
                       <Trash2 size={13} />
                     </button>
                   </div>
 
-                  {/* Panel mapping — expandable */}
-                  {cat.showMapping && (
-                    <div className="border-t border-border bg-surface px-3 py-3 space-y-3">
-                      <div>
-                        <p className="text-[11px] font-medium text-text-primary mb-1">
-                          Tangkap dari kategori transaksi:
-                        </p>
-                        <p className="text-[10px] text-text-secondary mb-2">
-                          Transaksi dengan kategori yang dicentang akan otomatis masuk ke budget kategori ini.
-                        </p>
-                        {txCategories.length === 0 ? (
-                          <p className="text-[10px] text-accent italic">Belum ada kategori transaksi.</p>
-                        ) : (
-                          <div className="flex flex-wrap gap-1.5">
-                            {txCategories.map((tc) => {
-                              const checked = cat.mapped_category_ids.includes(tc.id);
-                              return (
-                                <button key={tc.id} type="button"
-                                  onClick={() => toggleMappedCat(idx, tc.id)}
-                                  className={cn(
-                                    "px-2 py-1 rounded-full text-[11px] font-medium border transition-colors",
-                                    checked
-                                      ? "bg-text-primary text-background border-text-primary"
-                                      : "border-border text-text-secondary hover:border-accent"
-                                  )}>
-                                  {checked && "✓ "}{tc.name}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
+                  {/* Mapping ke kategori transaksi — selalu kelihatan, bukan disembunyiin di balik toggle */}
+                  <div className="border-t border-border bg-surface px-3 py-2.5 space-y-2">
+                    <div className="flex items-center gap-1.5">
+                      <Link2 size={11} className="text-text-secondary shrink-0" />
+                      <p className="text-[10px] text-text-secondary">
+                        Tangkap dari kategori transaksi (klik buat pilih):
+                      </p>
+                    </div>
+                    {txCategories.length === 0 ? (
+                      <p className="text-[10px] text-accent italic">Belum ada kategori transaksi.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                        {txCategories.map((tc) => {
+                          const checked = cat.mapped_category_ids.includes(tc.id);
+                          return (
+                            <button key={tc.id} type="button"
+                              onClick={() => toggleMappedCat(idx, tc.id)}
+                              className={cn(
+                                "px-2 py-1 rounded-full text-[11px] font-medium border transition-colors",
+                                checked
+                                  ? "bg-text-primary text-background border-text-primary"
+                                  : "border-border text-text-secondary hover:border-accent"
+                              )}>
+                              {checked && "✓ "}{tc.name}
+                            </button>
+                          );
+                        })}
                       </div>
+                    )}
 
-                      {/* Keyword filter — muncul kalau sudah ada mapping */}
-                      {cat.mapped_category_ids.length > 0 && (
-                        <div>
-                          <label className="block text-[11px] font-medium text-text-secondary mb-1">
-                            Filter kata kunci <span className="font-normal text-accent">(opsional)</span>
-                          </label>
-                          <input
-                            className={cn(ic, "text-xs py-1.5")}
-                            placeholder='cth: "KPR", "motor", "Netflix"'
-                            value={cat.keyword_filter}
-                            onChange={(e) => updateCat(idx, "keyword_filter", e.target.value)}
-                          />
-                          <p className="text-[10px] text-text-secondary mt-1">
-                            Hanya transaksi yang <span className="font-medium">namanya mengandung kata ini</span> yang akan masuk ke sini. Kosongkan untuk tangkap semua.
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Ringkasan mapping */}
-                      {cat.mapped_category_ids.length > 0 && (
+                    {cat.mapped_category_ids.length === 0 ? (
+                      <p className="flex items-center gap-1.5 text-[10px] text-warning">
+                        <AlertCircle size={11} className="shrink-0" />
+                        Belum ada kategori dipilih — kategori ini gak akan auto-update dari transaksi.
+                      </p>
+                    ) : (
+                      <>
+                        <input
+                          className={cn(ic, "text-xs py-1.5")}
+                          placeholder='Filter kata kunci opsional, cth: "KPR", "motor", "Netflix"'
+                          value={cat.keyword_filter}
+                          onChange={(e) => updateCat(idx, "keyword_filter", e.target.value)}
+                        />
                         <div className="text-[10px] text-success bg-success/10 rounded px-2 py-1.5">
                           ✓ Menangkap: <span className="font-medium">
                             {cat.mapped_category_ids.map((id) => txCategories.find((t) => t.id === id)?.name ?? id).join(", ")}
                           </span>
                           {cat.keyword_filter && <> · kata kunci "<span className="font-medium">{cat.keyword_filter}</span>"</>}
                         </div>
-                      )}
-                    </div>
-                  )}
+                      </>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
