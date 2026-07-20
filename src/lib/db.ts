@@ -354,7 +354,8 @@ async function syncBudgetActual(
         const { data: allCats } = await supabase
             .from("budget_categories")
             .select("id, name, actual_amount, mapped_category_ids, keyword_filter")
-            .eq("budget_id", budget.id);
+            .eq("budget_id", budget.id)
+            .order("created_at", { ascending: true });
 
         if (!allCats || allCats.length === 0) continue;
 
@@ -1299,7 +1300,8 @@ export async function recalculateBudgetActual(budgetId: string) {
     const { data: cats, error: catsErr } = await supabase
         .from("budget_categories")
         .select("id, name, mapped_category_ids, keyword_filter")
-        .eq("budget_id", budgetId);
+        .eq("budget_id", budgetId)
+        .order("created_at", { ascending: true });
     if (catsErr) throw catsErr;
     if (!cats || cats.length === 0) return;
 

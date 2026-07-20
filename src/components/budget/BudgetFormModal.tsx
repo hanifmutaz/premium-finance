@@ -121,6 +121,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
 
   // Integrasi mingguan
   const [monthlyBudgets, setMonthlyBudgets] = useState<Budget[]>([]);
+  const [existingWeeklyBudgets, setExistingWeeklyBudgets] = useState<Budget[]>([]);
   const [parentBudgetId, setParentBudgetId] = useState<string>("");
   const [weeklySourceCategory, setWeeklySourceCategory] = useState<string>("");
   const [loadingParents, setLoadingParents] = useState(false);
@@ -140,11 +141,24 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
     if (period === "weekly" && !isEdit) {
       setLoadingParents(true);
       getBudgets()
-        .then((data) => setMonthlyBudgets((data as Budget[]).filter((b) => b.period === "monthly")))
+        .then((data) => {
+          const all = data as Budget[];
+          setMonthlyBudgets(all.filter((b) => b.period === "monthly"));
+          setExistingWeeklyBudgets(all.filter((b) => b.period === "weekly"));
+        })
         .catch(() => { })
         .finally(() => setLoadingParents(false));
     }
   }, [period, isEdit]);
+
+  // Budget mingguan lain yang rentang tanggalnya overlap sama yang lagi
+  // diisi — kalau ada, transaksi bakal ke-hitung DOBEL di keduanya (lihat
+  // penjelasan di chat), jadi diperingatin di UI, bukan cuma pas submit.
+  const overlappingWeekly = period === "weekly" && !isEdit && startDate && endDate
+    ? existingWeeklyBudgets.filter((b) =>
+      b.start_date && b.end_date && b.start_date <= endDate && b.end_date >= startDate
+    )
+    : [];
 
   // budgetWeek cuma dipertahankan buat kolom legacy `week` (backward compat).
   // start_date/end_date di atas adalah sumber utama, jadi gak ada kontrol
@@ -286,6 +300,40 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
       if (!proceed) return;
     }
 
+    // Cek tabrakan mapping: kalau 2+ kategori di budget yang SAMA nangkep
+    // kategori transaksi yang sama, transaksi cuma akan masuk ke SATU
+    // kategori (yang paling lama dibuat) — sisanya "kehilangan" transaksi
+    // yang harusnya masuk ke sana. Lebih baik diperingatin dari awal
+    // daripada user bingung kenapa angkanya gak nambah.
+    const effectiveMappedIds = (c: typeof cats[number]): string[] =>
+      c.parent_budget_category_id
+        ? (parentCategories.find((pc) => pc.id === c.parent_budget_category_id)?.mapped_category_ids as string[] | undefined) ?? []
+        : c.mapped_category_ids;
+
+    const collisions: string[] = [];
+    for (let i = 0; i < cats.length; i++) {
+      for (let j = i + 1; j < cats.length; j++) {
+        const a = effectiveMappedIds(cats[i]);
+        const b = effectiveMappedIds(cats[j]);
+        const overlap = a.filter((id) => b.includes(id));
+        if (overlap.length > 0) {
+          collisions.push(`"${cats[i].name}" & "${cats[j].name}"`);
+        }
+        // Dua kategori yang sama-sama "ambil dari kategori bulanan" yang SAMA
+        if (cats[i].parent_budget_category_id && cats[i].parent_budget_category_id === cats[j].parent_budget_category_id) {
+          collisions.push(`"${cats[i].name}" & "${cats[j].name}" (sama-sama ambil dari kategori bulanan yang sama)`);
+        }
+      }
+    }
+    if (collisions.length > 0) {
+      const proceed = window.confirm(
+        `Ada kategori yang nangkep kategori transaksi sama: ${collisions.join(", ")}. ` +
+        `Transaksi yang cocok cuma akan masuk ke SATU kategori (yang paling lama dibuat), bukan kesebar. ` +
+        `Lanjut simpan begini?`
+      );
+      if (!proceed) return;
+    }
+
     setLoading(true);
     try {
       if (isEdit && editData) {
@@ -417,6 +465,15 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
                 <p className="text-[10px] text-text-secondary mt-1">
                   Rentang tanggal asli — bebas dipilih, gak harus ngikut batas bulan kalender.
                 </p>
+                {overlappingWeekly.length > 0 && (
+                  <p className="flex items-start gap-1.5 text-[10px] text-warning mt-1.5 bg-warning/10 rounded px-2 py-1.5">
+                    <AlertCircle size={11} className="shrink-0 mt-px" />
+                    Rentang ini overlap sama {overlappingWeekly.map((b) => `"${b.name}"`).join(", ")}.
+                    Transaksi di tanggal yang sama bakal ke-hitung DOBEL di kedua budget, bukan kesebar.
+                    Kalau maksudnya breakdown kategori (bensin/makan/lainnya) buat minggu yang sama,
+                    lebih baik ditaruh sebagai kategori dalam SATU budget ini aja.
+                  </p>
+                )}
               </>
             )}
             {period === "monthly" && !isEdit && (budgetMonth !== now.getMonth() + 1 || budgetYear !== now.getFullYear()) && (
