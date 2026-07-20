@@ -91,6 +91,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
   const [categories, setCategories] = useState<CatRow[]>(() => presetCats(defaultPeriod));
   const [budgetMonth, setBudgetMonth] = useState(now.getMonth() + 1);
   const [budgetYear, setBudgetYear] = useState(now.getFullYear());
+  const [budgetWeek, setBudgetWeek] = useState(Math.ceil(now.getDate() / 7));
 
   // Kategori transaksi (untuk dropdown mapping)
   const [txCategories, setTxCategories] = useState<TxCategory[]>([]);
@@ -144,6 +145,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
     setWeeklySourceCategory(editData.weekly_source_category ?? "");
     setBudgetMonth(editData.month ?? now.getMonth() + 1);
     setBudgetYear(editData.year ?? now.getFullYear());
+    setBudgetWeek(editData.week ?? Math.ceil(now.getDate() / 7));
     setCategories(editData.categories.map((c, i) => ({
       id: c.id,
       name: c.name,
@@ -167,7 +169,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
 
   const periodLabel = period === "monthly"
     ? `${MONTHS[budgetMonth - 1]} ${budgetYear}`
-    : `Minggu ${Math.ceil(now.getDate() / 7)} ${MONTHS[budgetMonth - 1]} ${budgetYear}`;
+    : `Minggu ${budgetWeek} ${MONTHS[budgetMonth - 1]} ${budgetYear}`;
 
   function addCategory() {
     setCategories((prev) => [...prev, {
@@ -227,6 +229,11 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
           name: name || editData.name,
           total_income: income,
           notes: notes || undefined,
+          // Weekly boleh diubah (dulu gak pernah ke-set sama sekali — ini jalan buat benerin data lama).
+          // Monthly tetap dikunci di UI (select disabled), jadi nilainya konsisten sama sebelumnya.
+          year: budgetYear,
+          month: budgetMonth,
+          week: period === "weekly" ? budgetWeek : null,
           categories: cats.map((c) => ({
             id: c.id,
             name: c.name,
@@ -243,8 +250,8 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
         await addBudget({
           name: budgetName, period,
           year: budgetYear,
-          month: period === "monthly" ? budgetMonth : undefined,
-          week: period === "weekly" ? Math.ceil(now.getDate() / 7) : undefined,
+          month: budgetMonth, // dulu: undefined buat weekly — makanya gak pernah ke-sync
+          week: period === "weekly" ? budgetWeek : undefined, // dulu: dihitung dari tanggal HARI INI, bukan pilihan user
           total_income: income,
           notes: notes || undefined,
           parent_budget_id: period === "weekly" && parentBudgetId ? parentBudgetId : null,
@@ -298,27 +305,39 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
             </div>
           </div>
 
-          {/* Pilih bulan/tahun */}
-          {period === "monthly" && (
-            <div>
-              <label className={lc}>Budget untuk bulan {isEdit && <span className="text-accent">(tidak bisa diubah)</span>}</label>
-              <div className="flex gap-2">
-                <select className={cn(ic, "flex-1 cursor-pointer")} value={budgetMonth}
-                  onChange={(e) => setBudgetMonth(Number(e.target.value))} disabled={isEdit}>
-                  {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+          {/* Pilih bulan/tahun (+ minggu ke berapa, khusus weekly) */}
+          <div>
+            <label className={lc}>
+              Budget untuk {period === "monthly" ? "bulan" : "minggu"}
+              {period === "monthly" && isEdit && <span className="text-accent"> (tidak bisa diubah)</span>}
+            </label>
+            <div className="flex gap-2">
+              {period === "weekly" && (
+                <select className={cn(ic, "w-24 cursor-pointer")} value={budgetWeek}
+                  onChange={(e) => setBudgetWeek(Number(e.target.value))}>
+                  {[1, 2, 3, 4, 5].map((w) => <option key={w} value={w}>Mgg {w}</option>)}
                 </select>
-                <select className={cn(ic, "w-28 cursor-pointer")} value={budgetYear}
-                  onChange={(e) => setBudgetYear(Number(e.target.value))} disabled={isEdit}>
-                  {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
-                </select>
-              </div>
-              {!isEdit && (budgetMonth !== now.getMonth() + 1 || budgetYear !== now.getFullYear()) && (
-                <p className="text-[10px] text-warning mt-1.5 flex items-center gap-1">
-                  <AlertCircle size={10} /> Budget ini hanya terpotong oleh transaksi bertanggal {MONTHS[budgetMonth - 1]} {budgetYear}
-                </p>
               )}
+              <select className={cn(ic, "flex-1 cursor-pointer")} value={budgetMonth}
+                onChange={(e) => setBudgetMonth(Number(e.target.value))} disabled={period === "monthly" && isEdit}>
+                {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+              </select>
+              <select className={cn(ic, "w-28 cursor-pointer")} value={budgetYear}
+                onChange={(e) => setBudgetYear(Number(e.target.value))} disabled={period === "monthly" && isEdit}>
+                {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
             </div>
-          )}
+            {period === "weekly" && (
+              <p className="text-[10px] text-text-secondary mt-1.5">
+                "Minggu {budgetWeek}" = tanggal {(budgetWeek - 1) * 7 + 1}–{Math.min(budgetWeek * 7, new Date(budgetYear, budgetMonth, 0).getDate())} {MONTHS[budgetMonth - 1]}.
+              </p>
+            )}
+            {period === "monthly" && !isEdit && (budgetMonth !== now.getMonth() + 1 || budgetYear !== now.getFullYear()) && (
+              <p className="text-[10px] text-warning mt-1.5 flex items-center gap-1">
+                <AlertCircle size={10} /> Budget ini hanya terpotong oleh transaksi bertanggal {MONTHS[budgetMonth - 1]} {budgetYear}
+              </p>
+            )}
+          </div>
 
           {/* Integrasi mingguan */}
           {period === "weekly" && !isEdit && (

@@ -1,7 +1,7 @@
 From 82b373b66155ed1e96a47bf587c0ea0c34506767 Mon Sep 17 00:00:00 2001
 From: Claude <dev@local>
 Date: Sun, 19 Jul 2026 14:04:47 +0000
-Subject: [PATCH 1/4] fix: budget sync gak reverse tipe saving pas
+Subject: [PATCH 1/5] fix: budget sync gak reverse tipe saving pas
  delete/update; UI budget category mapping selalu kelihatan + auto-map preset
  + warning kalau belum ke-mapping; hapus patch file sisa
 
@@ -3336,7 +3336,7 @@ index 0000000..74a7250
 From fec4938889b56c470c0d6fdf3df8d58e6240805d Mon Sep 17 00:00:00 2001
 From: Claude <dev@local>
 Date: Sun, 19 Jul 2026 14:04:50 +0000
-Subject: [PATCH 2/4] chore: ignore tsconfig.tsbuildinfo build artifact
+Subject: [PATCH 2/5] chore: ignore tsconfig.tsbuildinfo build artifact
 
 ---
  .gitignore           | 1 +
@@ -3368,7 +3368,7 @@ index 74a7250..0000000
 From e120469c8fc94bae00a447a931a95451f3ae345e Mon Sep 17 00:00:00 2001
 From: Claude <dev@local>
 Date: Sun, 19 Jul 2026 14:05:06 +0000
-Subject: [PATCH 3/4] chore: revert accidental package-lock.json regeneration
+Subject: [PATCH 3/5] chore: revert accidental package-lock.json regeneration
 
 ---
  package-lock.json | 102 ++++++++++++++++++++++++++++++++++++++++++++++
@@ -3725,7 +3725,7 @@ index 4f79aab..1fa7aed 100644
 From ac34b2ce1e0930aef633becfc995576ae8d197a1 Mon Sep 17 00:00:00 2001
 From: Claude <dev@local>
 Date: Sun, 19 Jul 2026 14:10:57 +0000
-Subject: [PATCH 4/4] feat: recalculate budget actual dari histori transaksi +
+Subject: [PATCH 4/5] feat: recalculate budget actual dari histori transaksi +
  tombol sinkron ulang di UI; refactor matching logic budget category jadi 1
  helper reusable (matchBudgetCategory) biar sync live & recalculate gak dobel
  logic lagi
@@ -3978,6 +3978,157 @@ index 2d9e689..638aef4 100644
  // ─── Notifications ──────────────────────────────────────────────────────────
  // Catatan: notif "jatuh tempo utang" idealnya di-generate harian oleh cron job
  // (supabase/functions/check-due-reminders) dan disimpan di tabel `notifications`.
+-- 
+2.43.0
+
+
+From 30bbebc277e09e53beddc9b83ed878cef733da8e Mon Sep 17 00:00:00 2001
+From: Claude <dev@local>
+Date: Mon, 20 Jul 2026 11:12:38 +0000
+Subject: [PATCH 5/5] fix: bug fundamental budget mingguan - kolom 'month' gak
+ pernah kesimpen (selalu undefined) dan 'week' dihitung dari tanggal hari-ini
+ bukan pilihan user; tambah selector minggu ke-berapa di form + izinkan edit
+ month/week/year khusus weekly budget buat benerin data yang udah kejadian;
+ fix timezone bug di recalculateBudgetActual (toISOString geser mundur 1 hari
+ di WIB/UTC+)
+
+---
+ src/components/budget/BudgetFormModal.tsx | 61 +++++++++++++++--------
+ src/lib/db.ts                             |  4 +-
+ 2 files changed, 43 insertions(+), 22 deletions(-)
+
+diff --git a/src/components/budget/BudgetFormModal.tsx b/src/components/budget/BudgetFormModal.tsx
+index f39125c..371cdd0 100644
+--- a/src/components/budget/BudgetFormModal.tsx
++++ b/src/components/budget/BudgetFormModal.tsx
+@@ -91,6 +91,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
+   const [categories, setCategories] = useState<CatRow[]>(() => presetCats(defaultPeriod));
+   const [budgetMonth, setBudgetMonth] = useState(now.getMonth() + 1);
+   const [budgetYear, setBudgetYear] = useState(now.getFullYear());
++  const [budgetWeek, setBudgetWeek] = useState(Math.ceil(now.getDate() / 7));
+ 
+   // Kategori transaksi (untuk dropdown mapping)
+   const [txCategories, setTxCategories] = useState<TxCategory[]>([]);
+@@ -144,6 +145,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
+     setWeeklySourceCategory(editData.weekly_source_category ?? "");
+     setBudgetMonth(editData.month ?? now.getMonth() + 1);
+     setBudgetYear(editData.year ?? now.getFullYear());
++    setBudgetWeek(editData.week ?? Math.ceil(now.getDate() / 7));
+     setCategories(editData.categories.map((c, i) => ({
+       id: c.id,
+       name: c.name,
+@@ -167,7 +169,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
+ 
+   const periodLabel = period === "monthly"
+     ? `${MONTHS[budgetMonth - 1]} ${budgetYear}`
+-    : `Minggu ${Math.ceil(now.getDate() / 7)} ${MONTHS[budgetMonth - 1]} ${budgetYear}`;
++    : `Minggu ${budgetWeek} ${MONTHS[budgetMonth - 1]} ${budgetYear}`;
+ 
+   function addCategory() {
+     setCategories((prev) => [...prev, {
+@@ -227,6 +229,11 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
+           name: name || editData.name,
+           total_income: income,
+           notes: notes || undefined,
++          // Weekly boleh diubah (dulu gak pernah ke-set sama sekali — ini jalan buat benerin data lama).
++          // Monthly tetap dikunci di UI (select disabled), jadi nilainya konsisten sama sebelumnya.
++          year: budgetYear,
++          month: budgetMonth,
++          week: period === "weekly" ? budgetWeek : null,
+           categories: cats.map((c) => ({
+             id: c.id,
+             name: c.name,
+@@ -243,8 +250,8 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
+         await addBudget({
+           name: budgetName, period,
+           year: budgetYear,
+-          month: period === "monthly" ? budgetMonth : undefined,
+-          week: period === "weekly" ? Math.ceil(now.getDate() / 7) : undefined,
++          month: budgetMonth, // dulu: undefined buat weekly — makanya gak pernah ke-sync
++          week: period === "weekly" ? budgetWeek : undefined, // dulu: dihitung dari tanggal HARI INI, bukan pilihan user
+           total_income: income,
+           notes: notes || undefined,
+           parent_budget_id: period === "weekly" && parentBudgetId ? parentBudgetId : null,
+@@ -298,27 +305,39 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
+             </div>
+           </div>
+ 
+-          {/* Pilih bulan/tahun */}
+-          {period === "monthly" && (
+-            <div>
+-              <label className={lc}>Budget untuk bulan {isEdit && <span className="text-accent">(tidak bisa diubah)</span>}</label>
+-              <div className="flex gap-2">
+-                <select className={cn(ic, "flex-1 cursor-pointer")} value={budgetMonth}
+-                  onChange={(e) => setBudgetMonth(Number(e.target.value))} disabled={isEdit}>
+-                  {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+-                </select>
+-                <select className={cn(ic, "w-28 cursor-pointer")} value={budgetYear}
+-                  onChange={(e) => setBudgetYear(Number(e.target.value))} disabled={isEdit}>
+-                  {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
++          {/* Pilih bulan/tahun (+ minggu ke berapa, khusus weekly) */}
++          <div>
++            <label className={lc}>
++              Budget untuk {period === "monthly" ? "bulan" : "minggu"}
++              {period === "monthly" && isEdit && <span className="text-accent"> (tidak bisa diubah)</span>}
++            </label>
++            <div className="flex gap-2">
++              {period === "weekly" && (
++                <select className={cn(ic, "w-24 cursor-pointer")} value={budgetWeek}
++                  onChange={(e) => setBudgetWeek(Number(e.target.value))}>
++                  {[1, 2, 3, 4, 5].map((w) => <option key={w} value={w}>Mgg {w}</option>)}
+                 </select>
+-              </div>
+-              {!isEdit && (budgetMonth !== now.getMonth() + 1 || budgetYear !== now.getFullYear()) && (
+-                <p className="text-[10px] text-warning mt-1.5 flex items-center gap-1">
+-                  <AlertCircle size={10} /> Budget ini hanya terpotong oleh transaksi bertanggal {MONTHS[budgetMonth - 1]} {budgetYear}
+-                </p>
+               )}
++              <select className={cn(ic, "flex-1 cursor-pointer")} value={budgetMonth}
++                onChange={(e) => setBudgetMonth(Number(e.target.value))} disabled={period === "monthly" && isEdit}>
++                {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
++              </select>
++              <select className={cn(ic, "w-28 cursor-pointer")} value={budgetYear}
++                onChange={(e) => setBudgetYear(Number(e.target.value))} disabled={period === "monthly" && isEdit}>
++                {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
++              </select>
+             </div>
+-          )}
++            {period === "weekly" && (
++              <p className="text-[10px] text-text-secondary mt-1.5">
++                "Minggu {budgetWeek}" = tanggal {(budgetWeek - 1) * 7 + 1}–{Math.min(budgetWeek * 7, new Date(budgetYear, budgetMonth, 0).getDate())} {MONTHS[budgetMonth - 1]}.
++              </p>
++            )}
++            {period === "monthly" && !isEdit && (budgetMonth !== now.getMonth() + 1 || budgetYear !== now.getFullYear()) && (
++              <p className="text-[10px] text-warning mt-1.5 flex items-center gap-1">
++                <AlertCircle size={10} /> Budget ini hanya terpotong oleh transaksi bertanggal {MONTHS[budgetMonth - 1]} {budgetYear}
++              </p>
++            )}
++          </div>
+ 
+           {/* Integrasi mingguan */}
+           {period === "weekly" && !isEdit && (
+diff --git a/src/lib/db.ts b/src/lib/db.ts
+index 638aef4..c3bad8f 100644
+--- a/src/lib/db.ts
++++ b/src/lib/db.ts
+@@ -1171,6 +1171,7 @@ export async function deleteBudget(id: string) {
+ 
+ export async function updateBudget(id: string, budget: {
+     name: string; total_income: number; notes?: string;
++    year?: number; month?: number | null; week?: number | null;
+     categories: {
+         id?: string; name: string; planned_amount: number; actual_amount?: number; color?: string;
+         mapped_category_ids?: string[] | null;
+@@ -1246,7 +1247,8 @@ export async function recalculateBudgetActual(budgetId: string) {
+         rangeStart = new Date(budget.year, (budget.month ?? 1) - 1, dayStart);
+         rangeEnd = new Date(budget.year, (budget.month ?? 1) - 1, dayEnd);
+     }
+-    const toISODate = (d: Date) => d.toISOString().slice(0, 10);
++    const toISODate = (d: Date) =>
++        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+ 
+     const { data: txs, error: txErr } = await supabase
+         .from("transactions")
 -- 
 2.43.0
 

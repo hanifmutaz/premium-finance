@@ -85,6 +85,19 @@ export default function BudgetPage() {
     }
   }
 
+  async function handleResync(id: string) {
+    setResyncingId(id);
+    try {
+      await recalculateBudgetActual(id);
+      toast.success("Realisasi budget disinkronkan ulang dari histori transaksi");
+      await load();
+    } catch {
+      toast.error("Gagal sinkronkan ulang");
+    } finally {
+      setResyncingId(null);
+    }
+  }
+
   return (
     <div className="space-y-5">
       {/* Header */}

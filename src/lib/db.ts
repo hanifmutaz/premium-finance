@@ -1171,6 +1171,7 @@ export async function deleteBudget(id: string) {
 
 export async function updateBudget(id: string, budget: {
     name: string; total_income: number; notes?: string;
+    year?: number; month?: number | null; week?: number | null;
     categories: {
         id?: string; name: string; planned_amount: number; actual_amount?: number; color?: string;
         mapped_category_ids?: string[] | null;
@@ -1246,7 +1247,8 @@ export async function recalculateBudgetActual(budgetId: string) {
         rangeStart = new Date(budget.year, (budget.month ?? 1) - 1, dayStart);
         rangeEnd = new Date(budget.year, (budget.month ?? 1) - 1, dayEnd);
     }
-    const toISODate = (d: Date) => d.toISOString().slice(0, 10);
+    const toISODate = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
     const { data: txs, error: txErr } = await supabase
         .from("transactions")
