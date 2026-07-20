@@ -285,6 +285,11 @@ create table if not exists public.budgets (
   year                    integer not null,
   month                   integer check (month between 1 and 12),
   week                    integer check (week between 1 and 53),
+  -- Rentang tanggal eksplisit buat budget mingguan (bukan minggu kalender
+  -- yang dihitung dari day-of-month/7). Ini sumber utama buat filter
+  -- transaksi kalau period = 'weekly'.
+  start_date              date,
+  end_date                date,
   total_income            numeric(15, 2) not null default 0,
   total_planned           numeric(15, 2) not null default 0,
   total_actual            numeric(15, 2) not null default 0,
@@ -306,6 +311,10 @@ create table if not exists public.budget_categories (
   -- Auto-sync dari transaksi (syncBudgetActual di src/lib/db.ts)
   mapped_category_ids   uuid[],
   keyword_filter        text,
+  -- Kalau kategori ini punya "induk" di budget bulanan (dipilih pas bikin
+  -- budget mingguan), mapping di atas disalin dari sini biar gak perlu
+  -- input ulang manual di form. Dipakai juga buat cek konsistensi/refresh.
+  parent_budget_category_id uuid references public.budget_categories(id) on delete set null,
   created_at            timestamptz not null default now()
 );
 

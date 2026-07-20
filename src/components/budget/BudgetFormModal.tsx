@@ -35,6 +35,23 @@ interface CatRow {
   color: string;
   mapped_category_ids: string[];
   keyword_filter: string;
+  // Kalau diisi, kategori ini "warisan" dari kategori bulanan induk —
+  // mapping (mapped_category_ids/keyword_filter) di-resolve otomatis di
+  // server dari kategori itu, gak perlu di-setup manual lagi di sini.
+  parent_budget_category_id: string | null;
+}
+
+// Rentang tanggal Senin-Minggu (kalender asli) yang meliputi tanggal `d`.
+function calendarWeekRange(d: Date): { start: Date; end: Date } {
+  const day = d.getDay(); // 0 = Minggu, 1 = Senin, ...
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() + diffToMonday);
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+  return { start, end };
+}
+
+function toISODate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 interface Props {
@@ -50,6 +67,7 @@ function presetCats(period: BudgetPeriod): CatRow[] {
       name: n, planned_amount: "", actual_amount: 0,
       color: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
       mapped_category_ids: [], keyword_filter: "",
+      parent_budget_category_id: null,
     }));
 }
 
@@ -92,6 +110,11 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
   const [budgetMonth, setBudgetMonth] = useState(now.getMonth() + 1);
   const [budgetYear, setBudgetYear] = useState(now.getFullYear());
   const [budgetWeek, setBudgetWeek] = useState(Math.ceil(now.getDate() / 7));
+  // Rentang tanggal minggu asli (Senin-Minggu) — sumber utama buat matching
+  // transaksi, gak lagi cuma "hari-ke-N / 7" yang gak match kalender beneran.
+  const defaultWeekRange = calendarWeekRange(now);
+  const [startDate, setStartDate] = useState(toISODate(defaultWeekRange.start));
+  const [endDate, setEndDate] = useState(toISODate(defaultWeekRange.end));
 
   // Kategori transaksi (untuk dropdown mapping)
   const [txCategories, setTxCategories] = useState<TxCategory[]>([]);
@@ -123,6 +146,16 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
     }
   }, [period, isEdit]);
 
+  // budgetWeek cuma dipertahankan buat kolom legacy `week` (backward compat).
+  // start_date/end_date di atas adalah sumber utama, jadi gak ada kontrol
+  // terpisah buat ini di UI — cukup diturunkan dari startDate.
+  useEffect(() => {
+    if (period !== "weekly") return;
+    const d = new Date(startDate);
+    if (isNaN(d.getTime())) return;
+    setBudgetWeek(Math.ceil(d.getDate() / 7));
+  }, [startDate, period]);
+
   const selectedParent = monthlyBudgets.find((b) => b.id === parentBudgetId);
   const parentCategories = selectedParent?.categories ?? [];
 
@@ -146,6 +179,17 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
     setBudgetMonth(editData.month ?? now.getMonth() + 1);
     setBudgetYear(editData.year ?? now.getFullYear());
     setBudgetWeek(editData.week ?? Math.ceil(now.getDate() / 7));
+    if (editData.start_date && editData.end_date) {
+      setStartDate(editData.start_date);
+      setEndDate(editData.end_date);
+    } else if (editData.period === "weekly" && editData.week && editData.month && editData.year) {
+      // Data lama belum di-backfill (belum jalanin migration 005) — hitung dari logic lama
+      const dayStart = (editData.week - 1) * 7 + 1;
+      const monthEndDay = new Date(editData.year, editData.month, 0).getDate();
+      const dayEnd = Math.min(editData.week * 7, monthEndDay);
+      setStartDate(toISODate(new Date(editData.year, editData.month - 1, dayStart)));
+      setEndDate(toISODate(new Date(editData.year, editData.month - 1, dayEnd)));
+    }
     setCategories(editData.categories.map((c, i) => ({
       id: c.id,
       name: c.name,
@@ -154,6 +198,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
       color: c.color ?? CATEGORY_COLORS[i % CATEGORY_COLORS.length],
       mapped_category_ids: (c.mapped_category_ids as string[]) ?? [],
       keyword_filter: c.keyword_filter ?? "",
+      parent_budget_category_id: (c as { parent_budget_category_id?: string | null }).parent_budget_category_id ?? null,
     })));
   }, [editData]);
 
@@ -176,7 +221,19 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
       name: "", planned_amount: "", actual_amount: 0,
       color: CATEGORY_COLORS[prev.length % CATEGORY_COLORS.length],
       mapped_category_ids: [], keyword_filter: "",
+      parent_budget_category_id: null,
     }]);
+  }
+
+  // Kalau kategori mingguan ini "warisan" dari kategori bulanan induk, gak
+  // perlu setup mapping manual lagi — server resolve otomatis dari sana.
+  function setCatParent(idx: number, parentCatId: string) {
+    setCategories((prev) => prev.map((c, i) => i === idx ? {
+      ...c,
+      parent_budget_category_id: parentCatId || null,
+      mapped_category_ids: parentCatId ? [] : c.mapped_category_ids,
+      keyword_filter: parentCatId ? "" : c.keyword_filter,
+    } : c));
   }
 
   function removeCategory(idx: number) {
@@ -205,6 +262,11 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
     setPeriod(p);
     setCategories(presetCats(p));
     setParentBudgetId(""); setWeeklySourceCategory("");
+    if (p === "weekly") {
+      const { start, end } = calendarWeekRange(now);
+      setStartDate(toISODate(start)); setEndDate(toISODate(end));
+      setBudgetMonth(start.getMonth() + 1); setBudgetYear(start.getFullYear());
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -213,7 +275,9 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
     if (cats.length === 0) { toast.error("Tambahkan minimal 1 kategori dengan nominal"); return; }
     if (!totalIncome || income <= 0) { toast.error("Total pemasukan wajib diisi"); return; }
 
-    const unmapped = cats.filter((c) => c.mapped_category_ids.length === 0 && !c.keyword_filter);
+    const unmapped = cats.filter((c) =>
+      c.mapped_category_ids.length === 0 && !c.keyword_filter && !c.parent_budget_category_id
+    );
     if (unmapped.length > 0) {
       const proceed = window.confirm(
         `${unmapped.length} kategori (${unmapped.map((c) => c.name).join(", ")}) belum di-mapping ke kategori transaksi. ` +
@@ -234,6 +298,8 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
           year: budgetYear,
           month: budgetMonth,
           week: period === "weekly" ? budgetWeek : null,
+          start_date: period === "weekly" ? startDate : null,
+          end_date: period === "weekly" ? endDate : null,
           categories: cats.map((c) => ({
             id: c.id,
             name: c.name,
@@ -242,6 +308,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
             color: c.color,
             mapped_category_ids: c.mapped_category_ids.length > 0 ? c.mapped_category_ids : null,
             keyword_filter: c.keyword_filter || null,
+            parent_budget_category_id: c.parent_budget_category_id,
           })),
         });
         toast.success("Budget berhasil diperbarui!");
@@ -252,6 +319,8 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
           year: budgetYear,
           month: budgetMonth, // dulu: undefined buat weekly — makanya gak pernah ke-sync
           week: period === "weekly" ? budgetWeek : undefined, // dulu: dihitung dari tanggal HARI INI, bukan pilihan user
+          start_date: period === "weekly" ? startDate : null,
+          end_date: period === "weekly" ? endDate : null,
           total_income: income,
           notes: notes || undefined,
           parent_budget_id: period === "weekly" && parentBudgetId ? parentBudgetId : null,
@@ -262,6 +331,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
             color: c.color,
             mapped_category_ids: c.mapped_category_ids.length > 0 ? c.mapped_category_ids : null,
             keyword_filter: c.keyword_filter || null,
+            parent_budget_category_id: c.parent_budget_category_id,
           })),
         });
         toast.success("Budget berhasil dibuat!");
@@ -305,32 +375,49 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
             </div>
           </div>
 
-          {/* Pilih bulan/tahun (+ minggu ke berapa, khusus weekly) */}
+          {/* Pilih bulan/tahun (monthly), atau rentang tanggal asli (weekly) */}
           <div>
             <label className={lc}>
-              Budget untuk {period === "monthly" ? "bulan" : "minggu"}
+              Budget untuk {period === "monthly" ? "bulan" : "rentang tanggal"}
               {period === "monthly" && isEdit && <span className="text-accent"> (tidak bisa diubah)</span>}
             </label>
-            <div className="flex gap-2">
-              {period === "weekly" && (
-                <select className={cn(ic, "w-24 cursor-pointer")} value={budgetWeek}
-                  onChange={(e) => setBudgetWeek(Number(e.target.value))}>
-                  {[1, 2, 3, 4, 5].map((w) => <option key={w} value={w}>Mgg {w}</option>)}
+            {period === "monthly" ? (
+              <div className="flex gap-2">
+                <select className={cn(ic, "flex-1 cursor-pointer")} value={budgetMonth}
+                  onChange={(e) => setBudgetMonth(Number(e.target.value))} disabled={isEdit}>
+                  {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
                 </select>
-              )}
-              <select className={cn(ic, "flex-1 cursor-pointer")} value={budgetMonth}
-                onChange={(e) => setBudgetMonth(Number(e.target.value))} disabled={period === "monthly" && isEdit}>
-                {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
-              </select>
-              <select className={cn(ic, "w-28 cursor-pointer")} value={budgetYear}
-                onChange={(e) => setBudgetYear(Number(e.target.value))} disabled={period === "monthly" && isEdit}>
-                {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
-              </select>
-            </div>
-            {period === "weekly" && (
-              <p className="text-[10px] text-text-secondary mt-1.5">
-                "Minggu {budgetWeek}" = tanggal {(budgetWeek - 1) * 7 + 1}–{Math.min(budgetWeek * 7, new Date(budgetYear, budgetMonth, 0).getDate())} {MONTHS[budgetMonth - 1]}.
-              </p>
+                <select className={cn(ic, "w-28 cursor-pointer")} value={budgetYear}
+                  onChange={(e) => setBudgetYear(Number(e.target.value))} disabled={isEdit}>
+                  {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-2 items-center">
+                  <input type="date" className={cn(ic, "flex-1 cursor-pointer")} value={startDate}
+                    onChange={(e) => {
+                      setStartDate(e.target.value);
+                      const d = new Date(e.target.value);
+                      setBudgetMonth(d.getMonth() + 1); setBudgetYear(d.getFullYear());
+                    }} />
+                  <span className="text-xs text-text-secondary shrink-0">s/d</span>
+                  <input type="date" className={cn(ic, "flex-1 cursor-pointer")} value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)} min={startDate} />
+                </div>
+                <button type="button"
+                  className="text-[10px] text-accent hover:text-text-primary transition-colors mt-1.5"
+                  onClick={() => {
+                    const { start, end } = calendarWeekRange(now);
+                    setStartDate(toISODate(start)); setEndDate(toISODate(end));
+                    setBudgetMonth(start.getMonth() + 1); setBudgetYear(start.getFullYear());
+                  }}>
+                  Pakai minggu ini (Senin–Minggu)
+                </button>
+                <p className="text-[10px] text-text-secondary mt-1">
+                  Rentang tanggal asli — bebas dipilih, gak harus ngikut batas bulan kalender.
+                </p>
+              </>
             )}
             {period === "monthly" && !isEdit && (budgetMonth !== now.getMonth() + 1 || budgetYear !== now.getFullYear()) && (
               <p className="text-[10px] text-warning mt-1.5 flex items-center gap-1">
@@ -433,53 +520,81 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
 
                   {/* Mapping ke kategori transaksi — selalu kelihatan, bukan disembunyiin di balik toggle */}
                   <div className="border-t border-border bg-surface px-3 py-2.5 space-y-2">
-                    <div className="flex items-center gap-1.5">
-                      <Link2 size={11} className="text-text-secondary shrink-0" />
-                      <p className="text-[10px] text-text-secondary">
-                        Tangkap dari kategori transaksi (klik buat pilih):
-                      </p>
-                    </div>
-                    {txCategories.length === 0 ? (
-                      <p className="text-[10px] text-accent italic">Belum ada kategori transaksi.</p>
-                    ) : (
-                      <div className="flex flex-wrap gap-1.5">
-                        {txCategories.map((tc) => {
-                          const checked = cat.mapped_category_ids.includes(tc.id);
-                          return (
-                            <button key={tc.id} type="button"
-                              onClick={() => toggleMappedCat(idx, tc.id)}
-                              className={cn(
-                                "px-2 py-1 rounded-full text-[11px] font-medium border transition-colors",
-                                checked
-                                  ? "bg-text-primary text-background border-text-primary"
-                                  : "border-border text-text-secondary hover:border-accent"
-                              )}>
-                              {checked && "✓ "}{tc.name}
-                            </button>
-                          );
-                        })}
+                    {/* Kalau budget mingguan ini nempel ke budget bulanan, kategori bisa "warisan"
+                        mapping dari kategori bulanan induk — gak perlu setup dari nol lagi */}
+                    {period === "weekly" && parentBudgetId && parentCategories.length > 0 && (
+                      <div>
+                        <label className="text-[10px] text-text-secondary flex items-center gap-1 mb-1">
+                          <Link2 size={11} className="shrink-0" /> Ambil kategori dari budget bulanan (opsional)
+                        </label>
+                        <select className={cn(ic, "text-xs py-1.5 cursor-pointer")}
+                          value={cat.parent_budget_category_id ?? ""}
+                          onChange={(e) => setCatParent(idx, e.target.value)}>
+                          <option value="">— Setup mapping manual sendiri —</option>
+                          {parentCategories.map((pc) => <option key={pc.id} value={pc.id}>{pc.name}</option>)}
+                        </select>
                       </div>
                     )}
 
-                    {cat.mapped_category_ids.length === 0 ? (
-                      <p className="flex items-center gap-1.5 text-[10px] text-warning">
-                        <AlertCircle size={11} className="shrink-0" />
-                        Belum ada kategori dipilih — kategori ini gak akan auto-update dari transaksi.
-                      </p>
+                    {cat.parent_budget_category_id ? (
+                      <div className="text-[10px] text-success bg-success/10 rounded px-2 py-1.5">
+                        ✓ Otomatis ikut mapping kategori bulanan{" "}
+                        <span className="font-medium">
+                          {parentCategories.find((pc) => pc.id === cat.parent_budget_category_id)?.name}
+                        </span>{" "}
+                        — gak perlu setup ulang, dan gak akan ke-drift kalau mapping-nya diubah di sana.
+                      </div>
                     ) : (
                       <>
-                        <input
-                          className={cn(ic, "text-xs py-1.5")}
-                          placeholder='Filter kata kunci opsional, cth: "KPR", "motor", "Netflix"'
-                          value={cat.keyword_filter}
-                          onChange={(e) => updateCat(idx, "keyword_filter", e.target.value)}
-                        />
-                        <div className="text-[10px] text-success bg-success/10 rounded px-2 py-1.5">
-                          ✓ Menangkap: <span className="font-medium">
-                            {cat.mapped_category_ids.map((id) => txCategories.find((t) => t.id === id)?.name ?? id).join(", ")}
-                          </span>
-                          {cat.keyword_filter && <> · kata kunci "<span className="font-medium">{cat.keyword_filter}</span>"</>}
+                        <div className="flex items-center gap-1.5">
+                          <Link2 size={11} className="text-text-secondary shrink-0" />
+                          <p className="text-[10px] text-text-secondary">
+                            Tangkap dari kategori transaksi (klik buat pilih):
+                          </p>
                         </div>
+                        {txCategories.length === 0 ? (
+                          <p className="text-[10px] text-accent italic">Belum ada kategori transaksi.</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5">
+                            {txCategories.map((tc) => {
+                              const checked = cat.mapped_category_ids.includes(tc.id);
+                              return (
+                                <button key={tc.id} type="button"
+                                  onClick={() => toggleMappedCat(idx, tc.id)}
+                                  className={cn(
+                                    "px-2 py-1 rounded-full text-[11px] font-medium border transition-colors",
+                                    checked
+                                      ? "bg-text-primary text-background border-text-primary"
+                                      : "border-border text-text-secondary hover:border-accent"
+                                  )}>
+                                  {checked && "✓ "}{tc.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {cat.mapped_category_ids.length === 0 ? (
+                          <p className="flex items-center gap-1.5 text-[10px] text-warning">
+                            <AlertCircle size={11} className="shrink-0" />
+                            Belum ada kategori dipilih — kategori ini gak akan auto-update dari transaksi.
+                          </p>
+                        ) : (
+                          <>
+                            <input
+                              className={cn(ic, "text-xs py-1.5")}
+                              placeholder='Filter kata kunci opsional, cth: "KPR", "motor", "Netflix"'
+                              value={cat.keyword_filter}
+                              onChange={(e) => updateCat(idx, "keyword_filter", e.target.value)}
+                            />
+                            <div className="text-[10px] text-success bg-success/10 rounded px-2 py-1.5">
+                              ✓ Menangkap: <span className="font-medium">
+                                {cat.mapped_category_ids.map((id) => txCategories.find((t) => t.id === id)?.name ?? id).join(", ")}
+                              </span>
+                              {cat.keyword_filter && <> · kata kunci "<span className="font-medium">{cat.keyword_filter}</span>"</>}
+                            </div>
+                          </>
+                        )}
                       </>
                     )}
                   </div>

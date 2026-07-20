@@ -267,8 +267,11 @@ async function syncBudgetActual(
     const date = new Date(txDate);
     const year = date.getFullYear();
     const month = date.getMonth() + 1;
+    // Fallback buat row weekly lama yang belum ke-backfill start_date/end_date
+    // (lihat migration 005). Row baru selalu punya start_date/end_date, jadi
+    // gak lagi bergantung ke "minggu ke-N dari hari/7" ini.
     const dayOfMonth = date.getDate();
-    const week = Math.ceil(dayOfMonth / 7);
+    const legacyWeek = Math.ceil(dayOfMonth / 7);
 
     let budgets: { id: string; period: string; year: number; month?: number; week?: number; parent_budget_id?: string | null }[] | null = null;
 
@@ -295,19 +298,42 @@ async function syncBudgetActual(
             }
         }
     } else {
-        // Default: cari semua budget yang bulan/tahunnya cocok dengan tanggal transaksi
-        // Ambil monthly + weekly yang cover tanggal ini, plus parent dari weekly manapun
-        const { data } = await supabase
+        // 1) Budget bulanan yang cover tanggal ini
+        const { data: monthlyData } = await supabase
             .from("budgets")
             .select("id, period, year, month, week, parent_budget_id")
             .eq("user_id", userId)
+            .eq("period", "monthly")
             .eq("year", year)
-            .or(`and(period.eq.monthly,month.eq.${month}),and(period.eq.weekly,month.eq.${month},week.eq.${week})`);
-        budgets = data ?? [];
+            .eq("month", month);
+
+        // 2) Budget mingguan yang rentang start_date/end_date-nya cover tanggal ini
+        //    (sumber utama — akurat, gak peduli minggu itu lintas bulan/tahun)
+        const { data: weeklyByDate } = await supabase
+            .from("budgets")
+            .select("id, period, year, month, week, parent_budget_id, start_date, end_date")
+            .eq("user_id", userId)
+            .eq("period", "weekly")
+            .lte("start_date", txDate)
+            .gte("end_date", txDate);
+
+        // 3) Fallback: budget mingguan LAMA yang belum punya start_date/end_date
+        //    (masih pakai definisi minggu = hari/7 yang lama)
+        const { data: weeklyLegacy } = await supabase
+            .from("budgets")
+            .select("id, period, year, month, week, parent_budget_id, start_date")
+            .eq("user_id", userId)
+            .eq("period", "weekly")
+            .eq("year", year)
+            .eq("month", month)
+            .eq("week", legacyWeek)
+            .is("start_date", null);
+
+        budgets = [...(monthlyData ?? []), ...(weeklyByDate ?? []), ...(weeklyLegacy ?? [])];
 
         // Ikut-sertakan parent budget dari weekly yang belum ada di list
-        const existingIds = new Set((budgets ?? []).map((b) => b.id));
-        const parentIds = (budgets ?? [])
+        const existingIds = new Set(budgets.map((b) => b.id));
+        const parentIds = budgets
             .map((b) => b.parent_budget_id)
             .filter((id): id is string => !!id && !existingIds.has(id));
 
@@ -317,7 +343,7 @@ async function syncBudgetActual(
                 .select("id, period, year, month, week, parent_budget_id")
                 .in("id", parentIds)
                 .eq("user_id", userId);
-            if (parentData) budgets = [...(budgets ?? []), ...parentData];
+            if (parentData) budgets = [...budgets, ...parentData];
         }
     }
 
@@ -1129,6 +1155,7 @@ export async function getBudgets() {
 
 export async function addBudget(budget: {
     name: string; period: string; year: number; month?: number; week?: number;
+    start_date?: string | null; end_date?: string | null;
     total_income: number; notes?: string;
     parent_budget_id?: string | null;
     weekly_source_category?: string | null;
@@ -1136,6 +1163,11 @@ export async function addBudget(budget: {
         name: string; planned_amount: number; color?: string;
         mapped_category_ids?: string[] | null;
         keyword_filter?: string | null;
+        // Kalau diisi, mapped_category_ids/keyword_filter di atas DIABAIKAN
+        // dan di-resolve otomatis dari kategori bulanan induk ini — jadi
+        // form gak perlu minta user isi mapping dua kali buat budget
+        // mingguan yang sebenarnya "irisan" dari kategori bulanan yang sama.
+        parent_budget_category_id?: string | null;
     }[];
 }) {
     const { supabase, userId } = await getSupabaseUser();
@@ -1150,14 +1182,33 @@ export async function addBudget(budget: {
     if (error) throw error;
 
     if (categories.length > 0) {
+        // Resolve mapping dari kategori induk buat yang direference
+        const parentIds = categories
+            .map((c) => c.parent_budget_category_id)
+            .filter((id): id is string => !!id);
+        let parentMap = new Map<string, { mapped_category_ids: string[] | null; keyword_filter: string | null }>();
+        if (parentIds.length > 0) {
+            const { data: parents } = await supabase
+                .from("budget_categories")
+                .select("id, mapped_category_ids, keyword_filter")
+                .in("id", parentIds);
+            parentMap = new Map((parents ?? []).map((p) => [p.id, p]));
+        }
+
         await supabase.from("budget_categories").insert(
-            categories.map((c) => ({
-                ...c,
-                budget_id: bud.id,
-                actual_amount: 0,
-                mapped_category_ids: c.mapped_category_ids ?? null,
-                keyword_filter: c.keyword_filter ?? null,
-            }))
+            categories.map((c) => {
+                const parent = c.parent_budget_category_id ? parentMap.get(c.parent_budget_category_id) : undefined;
+                return {
+                    name: c.name,
+                    planned_amount: c.planned_amount,
+                    color: c.color,
+                    budget_id: bud.id,
+                    actual_amount: 0,
+                    parent_budget_category_id: c.parent_budget_category_id ?? null,
+                    mapped_category_ids: parent ? parent.mapped_category_ids : (c.mapped_category_ids ?? null),
+                    keyword_filter: parent ? parent.keyword_filter : (c.keyword_filter ?? null),
+                };
+            })
         );
     }
     return bud;
@@ -1172,10 +1223,12 @@ export async function deleteBudget(id: string) {
 export async function updateBudget(id: string, budget: {
     name: string; total_income: number; notes?: string;
     year?: number; month?: number | null; week?: number | null;
+    start_date?: string | null; end_date?: string | null;
     categories: {
         id?: string; name: string; planned_amount: number; actual_amount?: number; color?: string;
         mapped_category_ids?: string[] | null;
         keyword_filter?: string | null;
+        parent_budget_category_id?: string | null;
     }[];
 }) {
     const { supabase } = await getSupabaseUser();
@@ -1191,18 +1244,35 @@ export async function updateBudget(id: string, budget: {
         .single();
     if (error) throw error;
 
+    // Resolve mapping dari kategori induk buat yang direference (sama kayak addBudget)
+    const parentIds = categories
+        .map((c) => c.parent_budget_category_id)
+        .filter((id): id is string => !!id);
+    let parentMap = new Map<string, { mapped_category_ids: string[] | null; keyword_filter: string | null }>();
+    if (parentIds.length > 0) {
+        const { data: parents } = await supabase
+            .from("budget_categories")
+            .select("id, mapped_category_ids, keyword_filter")
+            .in("id", parentIds);
+        parentMap = new Map((parents ?? []).map((p) => [p.id, p]));
+    }
+
     await supabase.from("budget_categories").delete().eq("budget_id", id);
     if (categories.length > 0) {
         await supabase.from("budget_categories").insert(
-            categories.map((c) => ({
-                name: c.name,
-                planned_amount: c.planned_amount,
-                actual_amount: c.actual_amount ?? 0,
-                color: c.color,
-                budget_id: id,
-                mapped_category_ids: c.mapped_category_ids ?? null,
-                keyword_filter: c.keyword_filter ?? null,
-            }))
+            categories.map((c) => {
+                const parent = c.parent_budget_category_id ? parentMap.get(c.parent_budget_category_id) : undefined;
+                return {
+                    name: c.name,
+                    planned_amount: c.planned_amount,
+                    actual_amount: c.actual_amount ?? 0,
+                    color: c.color,
+                    budget_id: id,
+                    parent_budget_category_id: c.parent_budget_category_id ?? null,
+                    mapped_category_ids: parent ? parent.mapped_category_ids : (c.mapped_category_ids ?? null),
+                    keyword_filter: parent ? parent.keyword_filter : (c.keyword_filter ?? null),
+                };
+            })
         );
     }
     return bud;
@@ -1220,7 +1290,7 @@ export async function recalculateBudgetActual(budgetId: string) {
 
     const { data: budget, error: budgetErr } = await supabase
         .from("budgets")
-        .select("id, period, year, month, week")
+        .select("id, period, year, month, week, start_date, end_date")
         .eq("id", budgetId)
         .eq("user_id", userId)
         .single();
@@ -1234,29 +1304,36 @@ export async function recalculateBudgetActual(budgetId: string) {
     if (!cats || cats.length === 0) return;
 
     // Rentang tanggal transaksi yang relevan buat periode budget ini.
-    // Monthly: sebulan penuh. Weekly: cuma hari-hari yang masuk minggu ke-N
-    // (definisi "minggu" di sini = grup 7 hari dari tanggal 1, sama kayak
-    // yang dipakai syncBudgetActual — bukan ISO week).
-    const monthStart = new Date(budget.year, (budget.month ?? 1) - 1, 1);
-    const monthEnd = new Date(budget.year, (budget.month ?? 1), 0); // hari terakhir bulan itu
-    let rangeStart = monthStart;
-    let rangeEnd = monthEnd;
-    if (budget.period === "weekly" && budget.week) {
-        const dayStart = (budget.week - 1) * 7 + 1;
-        const dayEnd = Math.min(budget.week * 7, monthEnd.getDate());
-        rangeStart = new Date(budget.year, (budget.month ?? 1) - 1, dayStart);
-        rangeEnd = new Date(budget.year, (budget.month ?? 1) - 1, dayEnd);
-    }
+    // Monthly: sebulan penuh. Weekly: pakai start_date/end_date asli kalau
+    // udah ada (row baru selalu punya ini — lihat migration 005). Row lama
+    // yang belum ke-backfill fallback ke definisi minggu = hari/7 yang lama.
     const toISODate = (d: Date) =>
         `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    const monthStart = new Date(budget.year, (budget.month ?? 1) - 1, 1);
+    const monthEnd = new Date(budget.year, (budget.month ?? 1), 0); // hari terakhir bulan itu
+    let rangeStartISO = toISODate(monthStart);
+    let rangeEndISO = toISODate(monthEnd);
+
+    if (budget.period === "weekly") {
+        if (budget.start_date && budget.end_date) {
+            rangeStartISO = budget.start_date;
+            rangeEndISO = budget.end_date;
+        } else if (budget.week) {
+            const dayStart = (budget.week - 1) * 7 + 1;
+            const dayEnd = Math.min(budget.week * 7, monthEnd.getDate());
+            rangeStartISO = toISODate(new Date(budget.year, (budget.month ?? 1) - 1, dayStart));
+            rangeEndISO = toISODate(new Date(budget.year, (budget.month ?? 1) - 1, dayEnd));
+        }
+    }
 
     const { data: txs, error: txErr } = await supabase
         .from("transactions")
         .select("amount, date, name, category_id, category:categories(name), type")
         .eq("user_id", userId)
         .in("type", ["expense", "debt_payment", "saving"])
-        .gte("date", toISODate(rangeStart))
-        .lte("date", toISODate(rangeEnd));
+        .gte("date", rangeStartISO)
+        .lte("date", rangeEndISO);
     if (txErr) throw txErr;
 
     // Akumulasi per budget_category dari nol

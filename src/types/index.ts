@@ -275,6 +275,9 @@ export interface BudgetCategory {
   mapped_category_ids?: string[] | null;
   // Filter tambahan: hanya transaksi yang namanya mengandung kata ini
   keyword_filter?: string | null;
+  // Kalau kategori ini "warisan" dari kategori bulanan induk (budget
+  // mingguan), field di atas di-resolve otomatis dari sana di server.
+  parent_budget_category_id?: string | null;
 }
 
 export interface Budget {
@@ -284,7 +287,11 @@ export interface Budget {
   period: BudgetPeriod;
   year: number;
   month?: number;   // 1-12, untuk monthly
-  week?: number;    // 1-53, untuk weekly
+  week?: number;    // 1-53, untuk weekly (legacy, dipertahankan buat backward compat)
+  // Rentang tanggal asli buat weekly — sumber utama filter transaksi,
+  // gak lagi pakai "hari-ke-N / 7" (lihat migration 005).
+  start_date?: string | null;
+  end_date?: string | null;
   total_income: number;
   total_planned: number;
   total_actual: number;
