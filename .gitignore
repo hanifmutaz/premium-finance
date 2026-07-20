@@ -13,3 +13,5 @@ yarn-error.log*
 .vercel
 *.pem
 tsconfig.tsbuildinfo
+*.rej
+*.patch
