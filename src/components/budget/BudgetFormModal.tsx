@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { X, Plus, Trash2, Loader2, Link2, AlertCircle } from "lucide-react";
 import { cn } from "@/utils";
-import { addBudget, updateBudget, getBudgets, getCategories } from "@/lib/db";
+import { addBudget, updateBudget, getBudgets } from "@/lib/db";
 import { toast } from "sonner";
 import type { Budget, BudgetPeriod } from "@/types";
 
@@ -24,8 +24,6 @@ const MONTHS = [
   "Januari", "Februari", "Maret", "April", "Mei", "Juni",
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
-
-interface TxCategory { id: string; name: string; }
 
 interface CatRow {
   id?: string;
@@ -71,32 +69,6 @@ function presetCats(period: BudgetPeriod): CatRow[] {
     }));
 }
 
-// Auto-mapping preset ke kategori transaksi yang beneran ada, berdasar
-// kata kunci yang lazim dipakai — biar preset gak lahir dalam keadaan
-// "kosongan" (gak mapping apa-apa) begitu kategori transaksi kedetect.
-const PRESET_AUTO_MAP: Record<string, string[]> = {
-  "makan & minum": ["makan"],
-  "makan harian": ["makan"],
-  transport: ["transport"],
-  belanja: ["belanja"],
-  "bayar utang": ["utang", "debt", "cicilan"],
-  tabungan: ["investasi", "tabungan"],
-  "tabungan minggu": ["investasi", "tabungan"],
-};
-
-function autoMapPresets(cats: CatRow[], txCategories: TxCategory[]): CatRow[] {
-  return cats.map((c) => {
-    if (c.mapped_category_ids.length > 0) return c; // udah ada mapping manual, jangan timpa
-    const keywords = PRESET_AUTO_MAP[c.name.toLowerCase()];
-    if (!keywords) return c;
-    const matches = txCategories.filter((tc) =>
-      keywords.some((kw) => tc.name.toLowerCase().includes(kw))
-    );
-    if (matches.length === 0) return c;
-    return { ...c, mapped_category_ids: matches.map((m) => m.id) };
-  });
-}
-
 export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: Props) {
   const isEdit = !!editData;
   const now = new Date();
@@ -116,26 +88,12 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
   const [startDate, setStartDate] = useState(toISODate(defaultWeekRange.start));
   const [endDate, setEndDate] = useState(toISODate(defaultWeekRange.end));
 
-  // Kategori transaksi (untuk dropdown mapping)
-  const [txCategories, setTxCategories] = useState<TxCategory[]>([]);
-
   // Integrasi mingguan
   const [monthlyBudgets, setMonthlyBudgets] = useState<Budget[]>([]);
   const [existingWeeklyBudgets, setExistingWeeklyBudgets] = useState<Budget[]>([]);
   const [parentBudgetId, setParentBudgetId] = useState<string>("");
   const [weeklySourceCategory, setWeeklySourceCategory] = useState<string>("");
   const [loadingParents, setLoadingParents] = useState(false);
-
-  useEffect(() => {
-    getCategories("expense").then(setTxCategories).catch(() => { });
-  }, []);
-
-  // Begitu kategori transaksi ke-load, coba auto-mapping preset yang belum
-  // di-mapping manual — biar user gak mulai dari kategori kosongan.
-  useEffect(() => {
-    if (isEdit || txCategories.length === 0) return;
-    setCategories((prev) => autoMapPresets(prev, txCategories));
-  }, [txCategories, isEdit]);
 
   useEffect(() => {
     if (period === "weekly" && !isEdit) {
@@ -258,19 +216,6 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
     setCategories((prev) => prev.map((c, i) => i === idx ? { ...c, [field]: value } : c));
   }
 
-  function toggleMappedCat(catIdx: number, txCatId: string) {
-    setCategories((prev) => prev.map((c, i) => {
-      if (i !== catIdx) return c;
-      const already = c.mapped_category_ids.includes(txCatId);
-      return {
-        ...c,
-        mapped_category_ids: already
-          ? c.mapped_category_ids.filter((id) => id !== txCatId)
-          : [...c.mapped_category_ids, txCatId],
-      };
-    }));
-  }
-
   function handlePeriodChange(p: BudgetPeriod) {
     if (isEdit) return;
     setPeriod(p);
@@ -289,37 +234,12 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
     if (cats.length === 0) { toast.error("Tambahkan minimal 1 kategori dengan nominal"); return; }
     if (!totalIncome || income <= 0) { toast.error("Total pemasukan wajib diisi"); return; }
 
-    const unmapped = cats.filter((c) =>
-      c.mapped_category_ids.length === 0 && !c.keyword_filter && !c.parent_budget_category_id
-    );
-    if (unmapped.length > 0) {
-      const proceed = window.confirm(
-        `${unmapped.length} kategori (${unmapped.map((c) => c.name).join(", ")}) belum di-mapping ke kategori transaksi. ` +
-        `Transaksi gak akan otomatis masuk ke kategori ini. Lanjut simpan tanpa mapping?`
-      );
-      if (!proceed) return;
-    }
-
-    // Cek tabrakan mapping: kalau 2+ kategori di budget yang SAMA nangkep
-    // kategori transaksi yang sama, transaksi cuma akan masuk ke SATU
-    // kategori (yang paling lama dibuat) — sisanya "kehilangan" transaksi
-    // yang harusnya masuk ke sana. Lebih baik diperingatin dari awal
-    // daripada user bingung kenapa angkanya gak nambah.
-    const effectiveMappedIds = (c: typeof cats[number]): string[] =>
-      c.parent_budget_category_id
-        ? (parentCategories.find((pc) => pc.id === c.parent_budget_category_id)?.mapped_category_ids as string[] | undefined) ?? []
-        : c.mapped_category_ids;
-
+    // Cek tabrakan rollup: kalau 2+ kategori mingguan sama-sama "ambil dari
+    // kategori bulanan" yang SAMA, actual_amount kategori bulanan itu bakal
+    // ke-hitung dobel pas rollup (dijumlah dua kali). Diperingatin dari awal.
     const collisions: string[] = [];
     for (let i = 0; i < cats.length; i++) {
       for (let j = i + 1; j < cats.length; j++) {
-        const a = effectiveMappedIds(cats[i]);
-        const b = effectiveMappedIds(cats[j]);
-        const overlap = a.filter((id) => b.includes(id));
-        if (overlap.length > 0) {
-          collisions.push(`"${cats[i].name}" & "${cats[j].name}"`);
-        }
-        // Dua kategori yang sama-sama "ambil dari kategori bulanan" yang SAMA
         if (cats[i].parent_budget_category_id && cats[i].parent_budget_category_id === cats[j].parent_budget_category_id) {
           collisions.push(`"${cats[i].name}" & "${cats[j].name}" (sama-sama ambil dari kategori bulanan yang sama)`);
         }
@@ -327,9 +247,8 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
     }
     if (collisions.length > 0) {
       const proceed = window.confirm(
-        `Ada kategori yang nangkep kategori transaksi sama: ${collisions.join(", ")}. ` +
-        `Transaksi yang cocok cuma akan masuk ke SATU kategori (yang paling lama dibuat), bukan kesebar. ` +
-        `Lanjut simpan begini?`
+        `Ada kategori yang rollup ke kategori bulanan yang sama: ${collisions.join(", ")}. ` +
+        `Ini bakal ke-hitung dobel di total bulanannya. Lanjut simpan begini?`
       );
       if (!proceed) return;
     }
@@ -575,86 +494,33 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
                     </button>
                   </div>
 
-                  {/* Mapping ke kategori transaksi — selalu kelihatan, bukan disembunyiin di balik toggle */}
-                  <div className="border-t border-border bg-surface px-3 py-2.5 space-y-2">
-                    {/* Kalau budget mingguan ini nempel ke budget bulanan, kategori bisa "warisan"
-                        mapping dari kategori bulanan induk — gak perlu setup dari nol lagi */}
-                    {period === "weekly" && parentBudgetId && parentCategories.length > 0 && (
-                      <div>
-                        <label className="text-[10px] text-text-secondary flex items-center gap-1 mb-1">
-                          <Link2 size={11} className="shrink-0" /> Ambil kategori dari budget bulanan (opsional)
-                        </label>
-                        <select className={cn(ic, "text-xs py-1.5 cursor-pointer")}
-                          value={cat.parent_budget_category_id ?? ""}
-                          onChange={(e) => setCatParent(idx, e.target.value)}>
-                          <option value="">— Setup mapping manual sendiri —</option>
-                          {parentCategories.map((pc) => <option key={pc.id} value={pc.id}>{pc.name}</option>)}
-                        </select>
-                      </div>
-                    )}
-
-                    {cat.parent_budget_category_id ? (
-                      <div className="text-[10px] text-success bg-success/10 rounded px-2 py-1.5">
-                        ✓ Otomatis ikut mapping kategori bulanan{" "}
-                        <span className="font-medium">
-                          {parentCategories.find((pc) => pc.id === cat.parent_budget_category_id)?.name}
-                        </span>{" "}
-                        — gak perlu setup ulang, dan gak akan ke-drift kalau mapping-nya diubah di sana.
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-1.5">
-                          <Link2 size={11} className="text-text-secondary shrink-0" />
-                          <p className="text-[10px] text-text-secondary">
-                            Tangkap dari kategori transaksi (klik buat pilih):
-                          </p>
-                        </div>
-                        {txCategories.length === 0 ? (
-                          <p className="text-[10px] text-accent italic">Belum ada kategori transaksi.</p>
-                        ) : (
-                          <div className="flex flex-wrap gap-1.5">
-                            {txCategories.map((tc) => {
-                              const checked = cat.mapped_category_ids.includes(tc.id);
-                              return (
-                                <button key={tc.id} type="button"
-                                  onClick={() => toggleMappedCat(idx, tc.id)}
-                                  className={cn(
-                                    "px-2 py-1 rounded-full text-[11px] font-medium border transition-colors",
-                                    checked
-                                      ? "bg-text-primary text-background border-text-primary"
-                                      : "border-border text-text-secondary hover:border-accent"
-                                  )}>
-                                  {checked && "✓ "}{tc.name}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        {cat.mapped_category_ids.length === 0 ? (
-                          <p className="flex items-center gap-1.5 text-[10px] text-warning">
-                            <AlertCircle size={11} className="shrink-0" />
-                            Belum ada kategori dipilih — kategori ini gak akan auto-update dari transaksi.
-                          </p>
-                        ) : (
-                          <>
-                            <input
-                              className={cn(ic, "text-xs py-1.5")}
-                              placeholder='Filter kata kunci opsional, cth: "KPR", "motor", "Netflix"'
-                              value={cat.keyword_filter}
-                              onChange={(e) => updateCat(idx, "keyword_filter", e.target.value)}
-                            />
-                            <div className="text-[10px] text-success bg-success/10 rounded px-2 py-1.5">
-                              ✓ Menangkap: <span className="font-medium">
-                                {cat.mapped_category_ids.map((id) => txCategories.find((t) => t.id === id)?.name ?? id).join(", ")}
-                              </span>
-                              {cat.keyword_filter && <> · kata kunci "<span className="font-medium">{cat.keyword_filter}</span>"</>}
-                            </div>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </div>
+                  {/* Kalau budget mingguan ini nempel ke budget bulanan, kategori bisa "warisan"
+                      link ke kategori bulanan induk — ini BUKAN buat matching transaksi (itu
+                      udah digantiin assignment eksplisit di halaman Transaksi), tapi biar
+                      actual_amount kategori BULANAN otomatis roll-up dari total kategori
+                      mingguan-mingguan di bawahnya. */}
+                  {period === "weekly" && parentBudgetId && parentCategories.length > 0 && (
+                    <div className="border-t border-border bg-surface px-3 py-2.5">
+                      <label className="text-[10px] text-text-secondary flex items-center gap-1 mb-1">
+                        <Link2 size={11} className="shrink-0" /> Bagian dari kategori bulanan (opsional)
+                      </label>
+                      <select className={cn(ic, "text-xs py-1.5 cursor-pointer")}
+                        value={cat.parent_budget_category_id ?? ""}
+                        onChange={(e) => setCatParent(idx, e.target.value)}>
+                        <option value="">— Berdiri sendiri —</option>
+                        {parentCategories.map((pc) => <option key={pc.id} value={pc.id}>{pc.name}</option>)}
+                      </select>
+                      {cat.parent_budget_category_id && (
+                        <p className="text-[10px] text-success mt-1.5">
+                          ✓ Realisasi kategori{" "}
+                          <span className="font-medium">
+                            {parentCategories.find((pc) => pc.id === cat.parent_budget_category_id)?.name}
+                          </span>{" "}
+                          di budget bulanan bakal ikut total dari sini.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
