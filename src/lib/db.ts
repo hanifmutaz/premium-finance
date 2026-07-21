@@ -1440,30 +1440,42 @@ export async function recalculateBudgetActual(budgetId: string) {
         }
     }
 
-    const { data: txs, error: txErr } = await supabase
+    const catIds = cats.map((c) => c.id);
+    const totals = new Map<string, number>(cats.map((c) => [c.id, 0]));
+
+    // Pass 1 — EKSPLISIT: dicari lewat budget_category_id LANGSUNG, TANPA
+    // filter tanggal sama sekali. Assignment eksplisit sengaja didesain
+    // lepas dari tanggal transaksi (kasus "belanja akhir bulan buat jatah
+    // bulan depan" — lihat picker di form transaksi), jadi resync juga harus
+    // ikut nyari berdasar assignment-nya, bukan mbatesin ke rentang tanggal
+    // budget ini (kalau dibatesin, transaksi yang tanggalnya di luar bulan
+    // budget tapi sengaja di-assign ke sini bakal ke-skip & ke-reset ke 0).
+    const { data: explicitTxs, error: explicitErr } = await supabase
+        .from("transactions")
+        .select("amount, budget_category_id")
+        .eq("user_id", userId)
+        .in("type", ["expense", "debt_payment", "saving"])
+        .in("budget_category_id", catIds);
+    if (explicitErr) throw explicitErr;
+    for (const tx of explicitTxs ?? []) {
+        if (!tx.budget_category_id) continue;
+        totals.set(tx.budget_category_id, (totals.get(tx.budget_category_id) ?? 0) + Number(tx.amount));
+    }
+
+    // Pass 2 — FUZZY: transaksi yang budget_category_id-nya NULL (gak
+    // di-assign eksplisit sama sekali) tetep dicari lewat rentang tanggal +
+    // matchBudgetCategory kayak sebelumnya, biar transaksi lama/yang
+    // di-skip user ("Otomatis") tetep kehitung.
+    const { data: fuzzyTxs, error: fuzzyErr } = await supabase
         .from("transactions")
         .select("amount, date, name, category_id, category:categories(name), type, budget_category_id")
         .eq("user_id", userId)
         .in("type", ["expense", "debt_payment", "saving"])
+        .is("budget_category_id", null)
         .gte("date", rangeStartISO)
         .lte("date", rangeEndISO);
-    if (txErr) throw txErr;
-
-    // Akumulasi per budget_category dari nol.
-    // - Transaksi dengan budget_category_id eksplisit → dihitung LANGSUNG ke
-    //   kategori itu (gak lewat fuzzy), dan cuma kalau kategori itu emang
-    //   bagian dari budget ini (bukan budget lain — biar gak salah tempat).
-    // - Transaksi tanpa budget_category_id (null) → tetap fuzzy-match kayak
-    //   sebelumnya, biar transaksi lama/yang di-skip user gak keitung 0.
-    const catIds = new Set(cats.map((c) => c.id));
-    const totals = new Map<string, number>(cats.map((c) => [c.id, 0]));
-    for (const tx of txs ?? []) {
-        if (tx.budget_category_id) {
-            if (catIds.has(tx.budget_category_id)) {
-                totals.set(tx.budget_category_id, (totals.get(tx.budget_category_id) ?? 0) + Number(tx.amount));
-            }
-            continue; // eksplisit ke budget lain → jangan ikut di-fuzzy-match ke sini
-        }
+    if (fuzzyErr) throw fuzzyErr;
+    for (const tx of fuzzyTxs ?? []) {
         const catName = (tx.category as { name?: string } | null)?.name ?? "";
         const matched = matchBudgetCategory(cats, tx.category_id ?? null, catName, tx.name ?? null);
         if (!matched) continue;
