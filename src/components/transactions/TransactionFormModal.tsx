@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Loader2, BookOpen } from "lucide-react";
+import { X, Loader2, BookOpen, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import {
   cn,
@@ -69,6 +69,7 @@ function emptyForm() {
 
 export function TransactionFormModal({ open, onClose, editData }: Props) {
   const isEdit = !!editData;
+  const now = new Date();
   const [loading, setLoading] = useState(false);
   const [type, setType] = useState<TransactionType>("expense");
   const [categories, setCategories] = useState<{ id: string; name: string }[]>(
@@ -78,6 +79,13 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [form, setForm] = useState(emptyForm());
   const [budgetCategoryId, setBudgetCategoryId] = useState<string>("");
+  // Periode budget yang lagi ditampilin di picker — SENGAJA independen dari
+  // form.date. Kasus nyata: belanja bulanan tgl 30 Juni itu transaksinya
+  // beneran tanggal 30 Juni (jangan diubah), tapi mau dipotong dari budget
+  // BULAN DEPAN (Juli). Kalau ini di-derive dari form.date, kasus itu gak
+  // mungkin — makanya dipisah, ada tombol geser bulan sendiri di picker.
+  const [pickerYear, setPickerYear] = useState(now.getFullYear());
+  const [pickerMonth, setPickerMonth] = useState(now.getMonth() + 1);
 
   useEffect(() => {
     if (!open) return;
@@ -95,12 +103,25 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
         payment_method: editData.payment_method,
       });
       setBudgetCategoryId(editData.budget_category_id ?? "");
+      const d = new Date(editData.date);
+      setPickerYear(d.getFullYear());
+      setPickerMonth(d.getMonth() + 1);
     } else {
       setType("expense");
       setForm(emptyForm());
       setBudgetCategoryId("");
+      const d = new Date();
+      setPickerYear(d.getFullYear());
+      setPickerMonth(d.getMonth() + 1);
     }
   }, [open, editData]);
+
+  function shiftPickerMonth(delta: number) {
+    const d = new Date(pickerYear, pickerMonth - 1 + delta, 1);
+    setPickerYear(d.getFullYear());
+    setPickerMonth(d.getMonth() + 1);
+    setBudgetCategoryId(""); // kategori dari bulan lama gak relevan lagi begitu pindah bulan
+  }
 
   useEffect(() => {
     if (open)
@@ -150,18 +171,26 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
     return d.getFullYear() === b.year && d.getMonth() + 1 === b.month && Math.ceil(d.getDate() / 7) === b.week;
   }
 
-  const relevantMonthly = budgets.find((b) => {
-    if (b.period !== "monthly" || !b.month) return false;
-    const d = new Date(form.date);
-    return b.year === d.getFullYear() && b.month === d.getMonth() + 1;
-  });
+  const relevantMonthly = budgets.find(
+    (b) => b.period === "monthly" && b.month === pickerMonth && b.year === pickerYear,
+  );
 
   const weeklyChildren = budgets
     .filter((b) => b.period === "weekly" && relevantMonthly && b.parent_budget_id === relevantMonthly.id)
     .sort((a, b) => (a.start_date ?? "").localeCompare(b.start_date ?? ""));
 
+  // Weekly berdiri sendiri (gak punya parent budget bulanan) — ikutin bulan
+  // picker juga (dari start_date, atau month/week buat row lama), bukan
+  // "nyakup tanggal transaksi" lagi.
+  function weeklyBelongsToPeriod(b: Budget, year: number, month: number): boolean {
+    if (b.start_date) {
+      const d = new Date(b.start_date);
+      return d.getFullYear() === year && d.getMonth() + 1 === month;
+    }
+    return b.year === year && b.month === month;
+  }
   const standaloneWeekly = budgets.filter(
-    (b) => b.period === "weekly" && !b.parent_budget_id && weeklyCoversDate(b, form.date),
+    (b) => b.period === "weekly" && !b.parent_budget_id && weeklyBelongsToPeriod(b, pickerYear, pickerMonth),
   );
 
   // Kategori bulanan yang JADI INDUK dari salah satu kategori mingguan di
@@ -175,8 +204,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
     ? relevantMonthly.categories.filter((c) => !childParentIds.has(c.id))
     : [];
 
-  const hasBudgetOptions =
-    isExpenseType && (weeklyChildren.length > 0 || standaloneWeekly.length > 0 || directMonthlyCats.length > 0);
+  const hasAnyBudgets = isExpenseType && budgets.some((b) => b.period === "monthly" || b.period === "weekly");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -369,13 +397,28 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
           </div>
 
           {/* Assign ke kategori budget */}
-          {hasBudgetOptions && (
+          {hasAnyBudgets && (
             <div>
               <label className={cn(labelClass, "flex items-center gap-1.5")}>
                 <BookOpen size={11} className="text-accent" />
                 Masukkan ke budget
                 <span className="text-accent">(opsional)</span>
               </label>
+
+              {/* Navigasi bulan budget — SENGAJA terpisah dari tanggal transaksi
+                  di atas. Contoh: belanja tgl 30 Juni buat jatah bulan Juli →
+                  tanggal transaksi tetap 30 Juni, geser panel ini ke Juli. */}
+              <div className="flex items-center justify-between mb-1.5 px-1">
+                <button type="button" onClick={() => shiftPickerMonth(-1)} className="text-accent hover:text-text-primary p-1">
+                  <ChevronLeft size={14} />
+                </button>
+                <span className="text-xs font-medium text-text-primary">
+                  {MONTHS[pickerMonth - 1]} {pickerYear}
+                </span>
+                <button type="button" onClick={() => shiftPickerMonth(1)} className="text-accent hover:text-text-primary p-1">
+                  <ChevronRight size={14} />
+                </button>
+              </div>
 
               <div className="border border-border rounded-md divide-y divide-border max-h-64 overflow-y-auto">
                 {/* Opsi default: gak di-assign, tetap auto-match kayak biasa */}
@@ -388,6 +431,12 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
                   />
                   <span className="text-text-secondary">Otomatis (sesuai tanggal &amp; kategori)</span>
                 </label>
+
+                {weeklyChildren.length === 0 && standaloneWeekly.length === 0 && directMonthlyCats.length === 0 && (
+                  <p className="px-3 py-2.5 text-[11px] text-accent italic">
+                    Gak ada budget di {MONTHS[pickerMonth - 1]} {pickerYear}.
+                  </p>
+                )}
 
                 {relevantMonthly && weeklyChildren.length > 0 && (
                   <div className="px-3 py-1.5 bg-surface text-[10px] font-semibold text-text-secondary uppercase tracking-wide">
