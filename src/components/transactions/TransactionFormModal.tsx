@@ -13,6 +13,7 @@ import {
   addTransaction,
   updateTransaction,
   getCategories,
+  addCategory,
   getAccounts,
   getBudgets,
 } from "@/lib/db";
@@ -79,6 +80,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [form, setForm] = useState(emptyForm());
   const [budgetCategoryId, setBudgetCategoryId] = useState<string>("");
+  const [categoryAutoFilled, setCategoryAutoFilled] = useState(false);
   // Periode budget yang lagi ditampilin di picker — SENGAJA independen dari
   // form.date. Kasus nyata: belanja bulanan tgl 30 Juni itu transaksinya
   // beneran tanggal 30 Juni (jangan diubah), tapi mau dipotong dari budget
@@ -103,6 +105,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
         payment_method: editData.payment_method,
       });
       setBudgetCategoryId(editData.budget_category_id ?? "");
+      setCategoryAutoFilled(false);
       const d = new Date(editData.date);
       setPickerYear(d.getFullYear());
       setPickerMonth(d.getMonth() + 1);
@@ -110,6 +113,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
       setType("expense");
       setForm(emptyForm());
       setBudgetCategoryId("");
+      setCategoryAutoFilled(false);
       const d = new Date();
       setPickerYear(d.getFullYear());
       setPickerMonth(d.getMonth() + 1);
@@ -121,6 +125,28 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
     setPickerYear(d.getFullYear());
     setPickerMonth(d.getMonth() + 1);
     setBudgetCategoryId(""); // kategori dari bulan lama gak relevan lagi begitu pindah bulan
+  }
+
+  // Pilih kategori budget dari picker + auto-isi field "Kategori" (buat
+  // Reports) biar user gak perlu pilih dua kali. Kalau kategori dengan nama
+  // yang sama belum ada di tabel categories, dibikinin otomatis — jadi gak
+  // perlu setup manual sama sekali. Tetep bisa di-override manual sesudahnya.
+  async function handlePickBudgetCategory(c: { id: string; name: string }) {
+    setBudgetCategoryId(c.id);
+    const existing = categories.find((cat) => cat.name.toLowerCase() === c.name.toLowerCase());
+    if (existing) {
+      setForm((f) => ({ ...f, category_id: existing.id }));
+      setCategoryAutoFilled(true);
+      return;
+    }
+    try {
+      const created = await addCategory({ name: c.name, type: "expense" });
+      setCategories((prev) => [...prev, created]);
+      setForm((f) => ({ ...f, category_id: created.id }));
+      setCategoryAutoFilled(true);
+    } catch {
+      // Gagal bikin kategori baru (jarang) — biarin user pilih manual, gak fatal.
+    }
   }
 
   useEffect(() => {
@@ -378,12 +404,18 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
               />
             </div>
             <div>
-              <label className={labelClass}>Kategori</label>
+              <label className={cn(labelClass, "flex items-center gap-1")}>
+                Kategori
+                {categoryAutoFilled && (
+                  <span className="text-success font-normal normal-case">· otomatis dari budget</span>
+                )}
+              </label>
               <select
                 value={form.category_id}
-                onChange={(e) =>
-                  setForm({ ...form, category_id: e.target.value })
-                }
+                onChange={(e) => {
+                  setForm({ ...form, category_id: e.target.value });
+                  setCategoryAutoFilled(false);
+                }}
                 className={inputClass}
               >
                 <option value="">Pilih kategori</option>
@@ -427,7 +459,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
                     type="radio"
                     name="budgetCategoryId"
                     checked={budgetCategoryId === ""}
-                    onChange={() => setBudgetCategoryId("")}
+                    onChange={() => { setBudgetCategoryId(""); setCategoryAutoFilled(false); }}
                   />
                   <span className="text-text-secondary">Otomatis (sesuai tanggal &amp; kategori)</span>
                 </label>
@@ -467,7 +499,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
                             type="radio"
                             name="budgetCategoryId"
                             checked={budgetCategoryId === c.id}
-                            onChange={() => setBudgetCategoryId(c.id)}
+                            onChange={() => handlePickBudgetCategory(c)}
                           />
                           <span
                             className="w-2 h-2 rounded-full shrink-0"
@@ -491,7 +523,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
                     </div>
                     {wb.categories.map((c) => (
                       <label key={c.id} className="flex items-center gap-2 pl-7 pr-3 py-1.5 text-xs cursor-pointer hover:bg-surface">
-                        <input type="radio" name="budgetCategoryId" checked={budgetCategoryId === c.id} onChange={() => setBudgetCategoryId(c.id)} />
+                        <input type="radio" name="budgetCategoryId" checked={budgetCategoryId === c.id} onChange={() => handlePickBudgetCategory(c)} />
                         <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: c.color || "var(--accent)" }} />
                         <span className="text-text-primary">{c.name}</span>
                         <span className="text-accent ml-auto tabular-nums">
@@ -509,7 +541,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
                     </div>
                     {directMonthlyCats.map((c) => (
                       <label key={c.id} className="flex items-center gap-2 pl-7 pr-3 py-1.5 text-xs cursor-pointer hover:bg-surface">
-                        <input type="radio" name="budgetCategoryId" checked={budgetCategoryId === c.id} onChange={() => setBudgetCategoryId(c.id)} />
+                        <input type="radio" name="budgetCategoryId" checked={budgetCategoryId === c.id} onChange={() => handlePickBudgetCategory(c)} />
                         <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: c.color || "var(--accent)" }} />
                         <span className="text-text-primary">{c.name}</span>
                         <span className="text-accent ml-auto tabular-nums">

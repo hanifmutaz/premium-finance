@@ -396,7 +396,7 @@ async function applyBudgetCategoryEffect(budgetCategoryId: string, amount: numbe
     // Supabase JS gak punya "increment" langsung tanpa baca dulu — baca actual_amount, tambah, tulis.
     const { data: current } = await supabase
         .from("budget_categories")
-        .select("id, budget_id, actual_amount")
+        .select("id, budget_id, actual_amount, parent_budget_category_id")
         .eq("id", budgetCategoryId)
         .single();
     if (!current) return; // kategori/budget-nya udah gak ada (mis. kehapus)
@@ -413,19 +413,34 @@ async function applyBudgetCategoryEffect(budgetCategoryId: string, amount: numbe
     const totalActual = (refreshedCats ?? []).reduce((s, c) => s + Number(c.actual_amount), 0);
     await supabase.from("budgets").update({ total_actual: totalActual }).eq("id", current.budget_id);
 
-    // Rollup ke budget bulanan induk (kalau budget kategori ini adalah budget mingguan yang punya parent)
-    const { data: thisBudget } = await supabase
-        .from("budgets")
-        .select("parent_budget_id")
-        .eq("id", current.budget_id)
-        .single();
-    if (thisBudget?.parent_budget_id) {
-        const { data: parentCats } = await supabase
+    // Rollup ke KATEGORI BULANAN spesifik yang jadi induknya (kalau kategori
+    // ini "anak" — link lewat parent_budget_category_id, mis. kategori "Kopi"
+    // di minggu 1 yang nempel ke kategori "Minggu 1" di budget bulanan).
+    // PENTING: recompute actual_amount kategori INDUK-nya dari SUM semua
+    // anaknya — bukan cuma recompute total budget doang, soalnya breakdown
+    // per-kategori di bulanan juga harus ke-update, gak cuma totalnya.
+    if (current.parent_budget_category_id) {
+        const { data: siblings } = await supabase
             .from("budget_categories")
             .select("actual_amount")
-            .eq("budget_id", thisBudget.parent_budget_id);
-        const parentTotal = (parentCats ?? []).reduce((s, c) => s + Number(c.actual_amount), 0);
-        await supabase.from("budgets").update({ total_actual: parentTotal }).eq("id", thisBudget.parent_budget_id);
+            .eq("parent_budget_category_id", current.parent_budget_category_id);
+        const siblingTotal = (siblings ?? []).reduce((s, c) => s + Number(c.actual_amount), 0);
+
+        const { data: parentCat } = await supabase
+            .from("budget_categories")
+            .update({ actual_amount: siblingTotal })
+            .eq("id", current.parent_budget_category_id)
+            .select("budget_id")
+            .single();
+
+        if (parentCat?.budget_id) {
+            const { data: parentBudgetCats } = await supabase
+                .from("budget_categories")
+                .select("actual_amount")
+                .eq("budget_id", parentCat.budget_id);
+            const parentBudgetTotal = (parentBudgetCats ?? []).reduce((s, c) => s + Number(c.actual_amount), 0);
+            await supabase.from("budgets").update({ total_actual: parentBudgetTotal }).eq("id", parentCat.budget_id);
+        }
     }
 }
 
@@ -1299,11 +1314,12 @@ export async function updateBudget(id: string, budget: {
     const { supabase } = await getSupabaseUser();
     const { categories, ...budgetData } = budget;
     const total_planned = categories.reduce((s, c) => s + c.planned_amount, 0);
-    const total_actual = categories.reduce((s, c) => s + (c.actual_amount ?? 0), 0);
+    // total_actual SENGAJA gak dihitung dari form di sini (bisa stale) —
+    // di-recompute dari data DB asli di akhir fungsi, setelah upsert kategori.
 
     const { data: bud, error } = await supabase
         .from("budgets")
-        .update({ ...budgetData, total_planned, total_actual, updated_at: new Date().toISOString() })
+        .update({ ...budgetData, total_planned, updated_at: new Date().toISOString() })
         .eq("id", id)
         .select()
         .single();
@@ -1322,25 +1338,56 @@ export async function updateBudget(id: string, budget: {
         parentMap = new Map((parents ?? []).map((p) => [p.id, p]));
     }
 
-    await supabase.from("budget_categories").delete().eq("budget_id", id);
-    if (categories.length > 0) {
-        await supabase.from("budget_categories").insert(
-            categories.map((c) => {
-                const parent = c.parent_budget_category_id ? parentMap.get(c.parent_budget_category_id) : undefined;
-                return {
-                    name: c.name,
-                    planned_amount: c.planned_amount,
-                    actual_amount: c.actual_amount ?? 0,
-                    color: c.color,
-                    budget_id: id,
-                    parent_budget_category_id: c.parent_budget_category_id ?? null,
-                    mapped_category_ids: parent ? parent.mapped_category_ids : (c.mapped_category_ids ?? null),
-                    keyword_filter: parent ? parent.keyword_filter : (c.keyword_filter ?? null),
-                };
-            })
-        );
+    // Upsert per-kategori — BUKAN delete-all+insert-all. Delete+insert bikin
+    // row ID baru tiap kali budget di-edit, yang artinya:
+    //   1. Transaksi yang udah nempel eksplisit (budget_category_id) ke
+    //      kategori itu KEPUTUS (FK-nya ON DELETE SET NULL)
+    //   2. actual_amount ke-reset ke apapun yang lagi ada di form (bisa stale)
+    // Kategori yang UDAH ADA (punya id) di-UPDATE di tempat, TANPA nyentuh
+    // actual_amount sama sekali (itu field yang di-maintain live oleh
+    // applyBudgetCategoryEffect/syncBudgetActual, bukan sesuatu yang
+    // di-submit dari form ini). Kategori baru (gak ada id) di-insert. Yang
+    // beneran dihapus user dari form → baru itu yang di-delete dari DB.
+    const { data: existingCats } = await supabase
+        .from("budget_categories")
+        .select("id")
+        .eq("budget_id", id);
+    const existingIds = new Set((existingCats ?? []).map((c) => c.id));
+    const submittedIds = new Set(categories.map((c) => c.id).filter((v): v is string => !!v));
+
+    const toDelete = Array.from(existingIds).filter((cid) => !submittedIds.has(cid));
+    if (toDelete.length > 0) {
+        await supabase.from("budget_categories").delete().in("id", toDelete);
     }
-    return bud;
+
+    for (const c of categories) {
+        const parent = c.parent_budget_category_id ? parentMap.get(c.parent_budget_category_id) : undefined;
+        const payload = {
+            name: c.name,
+            planned_amount: c.planned_amount,
+            color: c.color,
+            parent_budget_category_id: c.parent_budget_category_id ?? null,
+            mapped_category_ids: parent ? parent.mapped_category_ids : (c.mapped_category_ids ?? null),
+            keyword_filter: parent ? parent.keyword_filter : (c.keyword_filter ?? null),
+        };
+        if (c.id && existingIds.has(c.id)) {
+            // Sengaja gak ada actual_amount di sini — biar gak ketimpa.
+            await supabase.from("budget_categories").update(payload).eq("id", c.id);
+        } else {
+            await supabase.from("budget_categories").insert({ ...payload, budget_id: id, actual_amount: 0 });
+        }
+    }
+
+    // total_actual dihitung dari nilai actual_amount yang BENERAN ada di DB
+    // sekarang (bukan dari c.actual_amount form yang bisa stale).
+    const { data: freshCats } = await supabase
+        .from("budget_categories")
+        .select("actual_amount")
+        .eq("budget_id", id);
+    const freshTotalActual = (freshCats ?? []).reduce((s, c) => s + Number(c.actual_amount), 0);
+    await supabase.from("budgets").update({ total_actual: freshTotalActual }).eq("id", id);
+
+    return { ...bud, total_actual: freshTotalActual };
 }
 
 // ─── Recalculate budget actual dari histori transaksi ────────────────────────
