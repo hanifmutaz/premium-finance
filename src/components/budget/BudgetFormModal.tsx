@@ -17,7 +17,7 @@ const PRESET_CATEGORIES_MONTHLY = [
   "Tabungan", "Belanja", "Langganan", "Lainnya",
 ];
 const PRESET_CATEGORIES_WEEKLY = [
-  "Makan Harian", "Transport", "Belanja", "Hiburan", "Tabungan Minggu", "Lainnya",
+  "Transport", "Roko", "Kopi", "Lainnya",
 ];
 
 const MONTHS = [
