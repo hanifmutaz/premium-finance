@@ -77,8 +77,9 @@ export async function getTransactions(filters?: { type?: string; search?: string
 }
 
 export async function addTransaction(
-    tx: Omit<Transaction, "id" | "user_id" | "created_at" | "updated_at" | "category">,
+    tx: Omit<Transaction, "id" | "user_id" | "created_at" | "updated_at" | "category" | "budget_category_id">,
     overrideBudgetId?: string | null,
+    budgetCategoryId?: string | null,
 ) {
     const { supabase } = await getSupabaseUser();
 
@@ -88,6 +89,13 @@ export async function addTransaction(
     // langkah gagal di tengah (mis. koneksi putus pas sync budget), SEMUA
     // efeknya di-rollback bareng — gak ada transaksi yang "nyangkut" tanpa
     // ke-sync ke debt/budget seperti versi lama (3 request JS berurutan).
+    //
+    // budgetCategoryId (opsional): assignment EKSPLISIT user ke kategori
+    // budget tertentu (mis. "Minggu 1 > Kopi"). Kalau diisi, efeknya langsung
+    // & pasti (gak lewat fuzzy-matching sync_budget_actual sama sekali) —
+    // lihat apply_budget_category_effect di migration 006. Kalau kosong,
+    // behavior lama (fuzzy-match / overrideBudgetId) tetap jalan persis
+    // seperti sebelumnya.
     const { data, error } = await supabase.rpc("add_transaction_with_effects", {
         p_type: tx.type,
         p_name: tx.name,
@@ -102,6 +110,7 @@ export async function addTransaction(
         p_account_id: tx.account_id ?? null,
         p_to_account_id: tx.to_account_id ?? null,
         p_override_budget_id: overrideBudgetId ?? null,
+        p_budget_category_id: budgetCategoryId ?? null,
     });
     if (error) throw error;
 
@@ -379,6 +388,47 @@ async function syncBudgetActual(
     }
 }
 
+// Versi JS dari apply_budget_category_effect (SQL) — dipakai delete/update
+// transaksi yang budget_category_id-nya diisi eksplisit, biar gak lewat
+// fuzzy-matching sama sekali (langsung & pasti kena kategori yang di-assign).
+async function applyBudgetCategoryEffect(budgetCategoryId: string, amount: number) {
+    const supabase = createClient();
+    // Supabase JS gak punya "increment" langsung tanpa baca dulu — baca actual_amount, tambah, tulis.
+    const { data: current } = await supabase
+        .from("budget_categories")
+        .select("id, budget_id, actual_amount")
+        .eq("id", budgetCategoryId)
+        .single();
+    if (!current) return; // kategori/budget-nya udah gak ada (mis. kehapus)
+
+    await supabase
+        .from("budget_categories")
+        .update({ actual_amount: Number(current.actual_amount) + amount })
+        .eq("id", budgetCategoryId);
+
+    const { data: refreshedCats } = await supabase
+        .from("budget_categories")
+        .select("actual_amount")
+        .eq("budget_id", current.budget_id);
+    const totalActual = (refreshedCats ?? []).reduce((s, c) => s + Number(c.actual_amount), 0);
+    await supabase.from("budgets").update({ total_actual: totalActual }).eq("id", current.budget_id);
+
+    // Rollup ke budget bulanan induk (kalau budget kategori ini adalah budget mingguan yang punya parent)
+    const { data: thisBudget } = await supabase
+        .from("budgets")
+        .select("parent_budget_id")
+        .eq("id", current.budget_id)
+        .single();
+    if (thisBudget?.parent_budget_id) {
+        const { data: parentCats } = await supabase
+            .from("budget_categories")
+            .select("actual_amount")
+            .eq("budget_id", thisBudget.parent_budget_id);
+        const parentTotal = (parentCats ?? []).reduce((s, c) => s + Number(c.actual_amount), 0);
+        await supabase.from("budgets").update({ total_actual: parentTotal }).eq("id", thisBudget.parent_budget_id);
+    }
+}
+
 export async function deleteTransaction(id: string) {
     const { supabase, userId } = await getSupabaseUser();
 
@@ -393,7 +443,11 @@ export async function deleteTransaction(id: string) {
     if (error) throw error;
 
     if (tx && (tx.type === "expense" || tx.type === "debt_payment" || tx.type === "saving")) {
-        await syncBudgetActual(userId, tx.category?.name ?? "", -Number(tx.amount), tx.date, null, tx.category_id ?? null, tx.name ?? null);
+        if (tx.budget_category_id) {
+            await applyBudgetCategoryEffect(tx.budget_category_id, -Number(tx.amount));
+        } else {
+            await syncBudgetActual(userId, tx.category?.name ?? "", -Number(tx.amount), tx.date, null, tx.category_id ?? null, tx.name ?? null);
+        }
     }
 
     // If this was a debt payment, remove the linked debt_payments row too.
@@ -425,12 +479,22 @@ export async function updateTransaction(
         .single();
     if (error) throw error;
 
-    // Reverse old sync, then apply new sync (relevant for expense, debt_payment & saving)
+    // Reverse old sync, then apply new sync (relevant for expense, debt_payment & saving).
+    // Kalau assignment-nya eksplisit (budget_category_id), reverse/apply langsung ke situ —
+    // gak lewat fuzzy-matching, jadi gak mungkin salah nyantol ke kategori lain.
     if (original && (original.type === "expense" || original.type === "debt_payment" || original.type === "saving")) {
-        await syncBudgetActual(userId, original.category?.name ?? "", -Number(original.amount), original.date, null, original.category_id ?? null, original.name ?? null);
+        if (original.budget_category_id) {
+            await applyBudgetCategoryEffect(original.budget_category_id, -Number(original.amount));
+        } else {
+            await syncBudgetActual(userId, original.category?.name ?? "", -Number(original.amount), original.date, null, original.category_id ?? null, original.name ?? null);
+        }
     }
     if (data.type === "expense" || data.type === "debt_payment" || data.type === "saving") {
-        await syncBudgetActual(userId, data.category?.name ?? "", Number(data.amount), data.date, null, data.category_id ?? null, data.name ?? null);
+        if (data.budget_category_id) {
+            await applyBudgetCategoryEffect(data.budget_category_id, Number(data.amount));
+        } else {
+            await syncBudgetActual(userId, data.category?.name ?? "", Number(data.amount), data.date, null, data.category_id ?? null, data.name ?? null);
+        }
     }
 
     return data as Transaction;
@@ -1331,20 +1395,51 @@ export async function recalculateBudgetActual(budgetId: string) {
 
     const { data: txs, error: txErr } = await supabase
         .from("transactions")
-        .select("amount, date, name, category_id, category:categories(name), type")
+        .select("amount, date, name, category_id, category:categories(name), type, budget_category_id")
         .eq("user_id", userId)
         .in("type", ["expense", "debt_payment", "saving"])
         .gte("date", rangeStartISO)
         .lte("date", rangeEndISO);
     if (txErr) throw txErr;
 
-    // Akumulasi per budget_category dari nol
+    // Akumulasi per budget_category dari nol.
+    // - Transaksi dengan budget_category_id eksplisit → dihitung LANGSUNG ke
+    //   kategori itu (gak lewat fuzzy), dan cuma kalau kategori itu emang
+    //   bagian dari budget ini (bukan budget lain — biar gak salah tempat).
+    // - Transaksi tanpa budget_category_id (null) → tetap fuzzy-match kayak
+    //   sebelumnya, biar transaksi lama/yang di-skip user gak keitung 0.
+    const catIds = new Set(cats.map((c) => c.id));
     const totals = new Map<string, number>(cats.map((c) => [c.id, 0]));
     for (const tx of txs ?? []) {
+        if (tx.budget_category_id) {
+            if (catIds.has(tx.budget_category_id)) {
+                totals.set(tx.budget_category_id, (totals.get(tx.budget_category_id) ?? 0) + Number(tx.amount));
+            }
+            continue; // eksplisit ke budget lain → jangan ikut di-fuzzy-match ke sini
+        }
         const catName = (tx.category as { name?: string } | null)?.name ?? "";
         const matched = matchBudgetCategory(cats, tx.category_id ?? null, catName, tx.name ?? null);
         if (!matched) continue;
         totals.set(matched.id, (totals.get(matched.id) ?? 0) + Number(tx.amount));
+    }
+
+    // Rollup: kategori BULANAN yang punya "anak" di budget mingguan (lewat
+    // parent_budget_category_id) — actual_amount-nya = SUM semua anaknya,
+    // bukan hasil matching sendiri (biar gak dobel-hitung & selalu akurat
+    // tanpa perlu setup mapping terpisah di level bulanan).
+    if (budget.period === "monthly") {
+        const { data: children } = await supabase
+            .from("budget_categories")
+            .select("actual_amount, parent_budget_category_id")
+            .in("parent_budget_category_id", cats.map((c) => c.id));
+        if (children && children.length > 0) {
+            const rollup = new Map<string, number>();
+            for (const ch of children) {
+                if (!ch.parent_budget_category_id) continue;
+                rollup.set(ch.parent_budget_category_id, (rollup.get(ch.parent_budget_category_id) ?? 0) + Number(ch.actual_amount));
+            }
+            for (const [parentId, sum] of Array.from(rollup)) totals.set(parentId, sum);
+        }
     }
 
     for (const cat of cats) {

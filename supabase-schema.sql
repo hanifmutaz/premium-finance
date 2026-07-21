@@ -125,6 +125,10 @@ create table if not exists public.transactions (
   to_account_id     uuid references public.accounts(id) on delete set null,
   recurring_id      uuid references public.recurring_transactions(id) on delete set null,
   notes             text,
+  -- Assignment eksplisit ke kategori budget (opsional). NULL = pakai
+  -- fuzzy-matching lewat sync_budget_actual (mapped_category_ids/
+  -- keyword_filter/nama), kayak sebelumnya. Diisi = langsung, gak ambigu.
+  budget_category_id uuid references public.budget_categories(id) on delete set null,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
@@ -323,6 +327,7 @@ create index if not exists idx_transactions_user_id     on public.transactions(u
 create index if not exists idx_transactions_date        on public.transactions(date desc);
 create index if not exists idx_transactions_type        on public.transactions(type);
 create index if not exists idx_transactions_account_id  on public.transactions(account_id);
+create index if not exists idx_transactions_budget_category_id on public.transactions(budget_category_id);
 create index if not exists idx_debts_user_id            on public.debts(user_id);
 create index if not exists idx_debts_status             on public.debts(status);
 create index if not exists idx_goals_user_id            on public.goals(user_id);
@@ -505,7 +510,6 @@ alter table public.transactions add constraint transactions_type_check
 -- baru, tidak mengubah/menghapus tabel atau data manapun).
 -- ============================================================
 
--- ─── Helper: sync budget actual (port 1:1 dari syncBudgetActual di db.ts) ────
 create or replace function public.sync_budget_actual(
   p_user_id        uuid,
   p_amount         numeric,
@@ -527,7 +531,6 @@ declare
   v_matched_id uuid;
 begin
   if p_override_budget_id is not null then
-    -- Budget yang dipilih user secara eksplisit + parent-nya (kalau weekly)
     select array_agg(id) into v_budget_ids
     from public.budgets
     where user_id = p_user_id
@@ -535,20 +538,30 @@ begin
            or id = (select parent_budget_id from public.budgets
                      where id = p_override_budget_id and user_id = p_user_id));
   else
-    -- Semua budget (monthly + weekly) yang cover tanggal transaksi,
-    -- plus parent dari weekly manapun yang belum termasuk
     select array_agg(id) into v_budget_ids
     from (
       select id from public.budgets
       where user_id = p_user_id and year = v_year
         and (
           (period = 'monthly' and month = v_month)
-          or (period = 'weekly' and month = v_month and week = v_week)
+          or (
+            period = 'weekly' and (
+              -- Row baru: start_date/end_date eksplisit adalah sumber utama
+              (start_date is not null and end_date is not null
+               and p_date between start_date and end_date)
+              -- Row lama yang belum di-backfill: fallback ke month/week
+              or (start_date is null and month = v_month and week = v_week)
+            )
+          )
         )
       union
       select b.parent_budget_id from public.budgets b
-      where b.user_id = p_user_id and b.year = v_year
-        and b.period = 'weekly' and b.month = v_month and b.week = v_week
+      where b.user_id = p_user_id and b.year = v_year and b.period = 'weekly'
+        and (
+          (b.start_date is not null and b.end_date is not null
+           and p_date between b.start_date and b.end_date)
+          or (b.start_date is null and b.month = v_month and b.week = v_week)
+        )
         and b.parent_budget_id is not null
     ) ids;
   end if;
@@ -562,7 +575,6 @@ begin
   loop
     v_matched_id := null;
 
-    -- Prioritas 1 & 2: mapped_category_ids cocok (+ keyword_filter kalau ada)
     if p_category_id is not null then
       select id into v_matched_id
       from public.budget_categories
@@ -577,7 +589,6 @@ begin
       limit 1;
     end if;
 
-    -- Prioritas 3: keyword_filter cocok di nama transaksi (debt_payment/saving tanpa kategori)
     if v_matched_id is null and p_tx_name is not null then
       select id into v_matched_id
       from public.budget_categories
@@ -588,7 +599,6 @@ begin
       limit 1;
     end if;
 
-    -- Prioritas 4: fallback name-matching lama
     if v_matched_id is null and p_category_name is not null and p_category_name <> '' then
       select id into v_matched_id
       from public.budget_categories
@@ -599,7 +609,6 @@ begin
     end if;
 
     if v_matched_id is not null then
-      -- Atomic increment (bukan read-then-write seperti versi JS lama)
       update public.budget_categories
       set actual_amount = actual_amount + p_amount
       where id = v_matched_id;
@@ -616,7 +625,63 @@ begin
 end;
 $$;
 
--- ─── Main: insert transaction + debt_payment + budget sync, 1 transaction ───
+-- ─── Helper: apply/reverse efek budget buat assignment eksplisit ────────────
+-- Naik/turunin actual_amount kategori yang di-assign LANGSUNG (gak ada
+-- matching sama sekali), lalu rollup ke budget induknya (baik budget si
+-- kategori itu sendiri, maupun — kalau kategori ini adalah anak dari kategori
+-- bulanan lewat parent_budget_category_id — total_actual budget bulanan itu
+-- ikut ke-refresh juga).
+create or replace function public.apply_budget_category_effect(
+  p_budget_category_id uuid,
+  p_amount              numeric
+) returns void
+language plpgsql
+security invoker
+as $$
+declare
+  v_budget_id uuid;
+  v_parent_monthly_budget_id uuid;
+begin
+  if p_budget_category_id is null then
+    return;
+  end if;
+
+  update public.budget_categories
+  set actual_amount = actual_amount + p_amount
+  where id = p_budget_category_id
+  returning budget_id into v_budget_id;
+
+  if v_budget_id is null then
+    return; -- kategori/budget-nya udah gak ada (mungkin kehapus)
+  end if;
+
+  update public.budgets
+  set total_actual = (
+    select coalesce(sum(actual_amount), 0)
+    from public.budget_categories where budget_id = v_budget_id
+  )
+  where id = v_budget_id;
+
+  -- Rollup ke budget BULANAN kalau budget si kategori ini (mingguan) punya
+  -- parent_budget_id — total_actual budget bulanan = SUM semua transaksi
+  -- yang ke-assign eksplisit di seluruh minggu di bawahnya (lewat kategori
+  -- yang mapped_category_ids-nya udah disalin dari induk, atau lewat
+  -- kategori bulanan yang ini adalah anaknya).
+  select parent_budget_id into v_parent_monthly_budget_id
+  from public.budgets where id = v_budget_id;
+
+  if v_parent_monthly_budget_id is not null then
+    update public.budgets
+    set total_actual = (
+      select coalesce(sum(actual_amount), 0)
+      from public.budget_categories where budget_id = v_parent_monthly_budget_id
+    )
+    where id = v_parent_monthly_budget_id;
+  end if;
+end;
+$$;
+
+-- ─── add_transaction_with_effects: tambah param budget_category_id ──────────
 create or replace function public.add_transaction_with_effects(
   p_type            text,
   p_name            text,
@@ -632,7 +697,8 @@ create or replace function public.add_transaction_with_effects(
   p_to_account_id   uuid default null,
   p_recurring_id    uuid default null,
   p_notes           text default null,
-  p_override_budget_id uuid default null
+  p_override_budget_id uuid default null,
+  p_budget_category_id uuid default null
 ) returns jsonb
 language plpgsql
 security invoker
@@ -649,37 +715,40 @@ begin
   insert into public.transactions (
     user_id, type, name, description, category_id, amount, date,
     payment_method, status, attachment_url, debt_id, account_id,
-    to_account_id, recurring_id, notes
+    to_account_id, recurring_id, notes, budget_category_id
   ) values (
     v_user_id, p_type, p_name, p_description, p_category_id, p_amount, p_date,
     p_payment_method, p_status, p_attachment_url, p_debt_id, p_account_id,
-    p_to_account_id, p_recurring_id, p_notes
+    p_to_account_id, p_recurring_id, p_notes, p_budget_category_id
   )
   returning * into v_tx;
 
   if p_type = 'debt_payment' and p_debt_id is not null then
     insert into public.debt_payments (debt_id, transaction_id, amount, date)
     values (p_debt_id, v_tx.id, p_amount, p_date);
-    -- trigger trg_sync_debt_payment otomatis update debts.total_paid & status
   end if;
 
   if p_type in ('expense', 'debt_payment', 'saving') then
-    select name into v_category_name from public.categories where id = p_category_id;
-
-    perform public.sync_budget_actual(
-      v_user_id, p_amount, p_date, p_override_budget_id,
-      p_category_id, coalesce(v_category_name, ''), p_name
-    );
+    if p_budget_category_id is not null then
+      -- Jalur eksplisit: langsung, gak lewat matching apapun.
+      perform public.apply_budget_category_effect(p_budget_category_id, p_amount);
+    else
+      -- Jalur lama: fuzzy-match (behavior gak berubah).
+      select name into v_category_name from public.categories where id = p_category_id;
+      perform public.sync_budget_actual(
+        v_user_id, p_amount, p_date, p_override_budget_id,
+        p_category_id, coalesce(v_category_name, ''), p_name
+      );
+    end if;
   end if;
 
-  -- Kembalikan transaksi + kategori (biar konsisten sama bentuk return lama)
   return jsonb_build_object(
     'id', v_tx.id, 'user_id', v_tx.user_id, 'type', v_tx.type, 'name', v_tx.name,
     'description', v_tx.description, 'category_id', v_tx.category_id,
     'amount', v_tx.amount, 'date', v_tx.date, 'payment_method', v_tx.payment_method,
     'status', v_tx.status, 'attachment_url', v_tx.attachment_url, 'debt_id', v_tx.debt_id,
     'account_id', v_tx.account_id, 'to_account_id', v_tx.to_account_id,
-    'recurring_id', v_tx.recurring_id, 'notes', v_tx.notes,
+    'recurring_id', v_tx.recurring_id, 'notes', v_tx.notes, 'budget_category_id', v_tx.budget_category_id,
     'created_at', v_tx.created_at, 'updated_at', v_tx.updated_at,
     'category', (select to_jsonb(c) from public.categories c where c.id = v_tx.category_id)
   );

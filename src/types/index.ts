@@ -43,6 +43,7 @@ export interface Transaction {
   to_account_id?: string;
   account?: Account;
   to_account?: Account;
+  budget_category_id?: string | null;
   created_at: string;
   updated_at: string;
 }

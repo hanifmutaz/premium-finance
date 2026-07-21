@@ -77,7 +77,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
   const [accounts, setAccounts] = useState<AccountWithBalance[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [form, setForm] = useState(emptyForm());
-  const [overrideBudgetId, setOverrideBudgetId] = useState<string>("");
+  const [budgetCategoryId, setBudgetCategoryId] = useState<string>("");
 
   useEffect(() => {
     if (!open) return;
@@ -94,10 +94,11 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
         date: editData.date,
         payment_method: editData.payment_method,
       });
+      setBudgetCategoryId(editData.budget_category_id ?? "");
     } else {
       setType("expense");
       setForm(emptyForm());
-      setOverrideBudgetId("");
+      setBudgetCategoryId("");
     }
   }, [open, editData]);
 
@@ -125,7 +126,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
   }, [open, type]);
 
   useEffect(() => {
-    if (type !== "expense" && type !== "debt_payment") setOverrideBudgetId("");
+    if (type !== "expense" && type !== "debt_payment") setBudgetCategoryId("");
   }, [type]);
 
   function handleAmountChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -137,18 +138,45 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
     }));
   }
 
-  const isExpenseType = type === "expense" || type === "debt_payment";
-  const expenseBudgets = budgets.filter(
-    (b) => b.period === "monthly" || b.period === "weekly",
-  );
-  const selectedBudget = expenseBudgets.find((b) => b.id === overrideBudgetId);
+  const isExpenseType = type === "expense" || type === "debt_payment" || type === "saving";
 
-  function budgetLabel(b: Budget) {
-    if (b.period === "monthly" && b.month) {
-      return `${b.name} · ${MONTHS[(b.month ?? 1) - 1]} ${b.year}`;
-    }
-    return b.name;
+  // Budget mingguan mencakup tanggal transaksi kalau: punya start_date/end_date
+  // eksplisit yang nyakup tanggal itu (row baru, lihat migration 005), ATAU
+  // (fallback row lama) month+tahun sama & week = ceil(tgl/7).
+  function weeklyCoversDate(b: Budget, dateStr: string): boolean {
+    if (b.start_date && b.end_date) return dateStr >= b.start_date && dateStr <= b.end_date;
+    if (!b.week || !b.month) return false;
+    const d = new Date(dateStr);
+    return d.getFullYear() === b.year && d.getMonth() + 1 === b.month && Math.ceil(d.getDate() / 7) === b.week;
   }
+
+  const relevantMonthly = budgets.find((b) => {
+    if (b.period !== "monthly" || !b.month) return false;
+    const d = new Date(form.date);
+    return b.year === d.getFullYear() && b.month === d.getMonth() + 1;
+  });
+
+  const weeklyChildren = budgets
+    .filter((b) => b.period === "weekly" && relevantMonthly && b.parent_budget_id === relevantMonthly.id)
+    .sort((a, b) => (a.start_date ?? "").localeCompare(b.start_date ?? ""));
+
+  const standaloneWeekly = budgets.filter(
+    (b) => b.period === "weekly" && !b.parent_budget_id && weeklyCoversDate(b, form.date),
+  );
+
+  // Kategori bulanan yang JADI INDUK dari salah satu kategori mingguan di
+  // atas gak ditampilin sebagai opsi sendiri — actual_amount-nya rollup
+  // otomatis dari anak-anaknya, jadi gak perlu (dan gak boleh) di-assign
+  // transaksi langsung ke situ juga (bisa dobel-hitung).
+  const childParentIds = new Set(
+    weeklyChildren.flatMap((b) => b.categories.map((c) => c.parent_budget_category_id).filter(Boolean)),
+  );
+  const directMonthlyCats = relevantMonthly
+    ? relevantMonthly.categories.filter((c) => !childParentIds.has(c.id))
+    : [];
+
+  const hasBudgetOptions =
+    isExpenseType && (weeklyChildren.length > 0 || standaloneWeekly.length > 0 || directMonthlyCats.length > 0);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -175,6 +203,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
             type !== "transfer" ? form.account_id || undefined : undefined,
           date: form.date,
           payment_method: form.payment_method,
+          budget_category_id: budgetCategoryId || null,
         });
         toast.success("Transaksi berhasil diperbarui");
       } else {
@@ -191,12 +220,13 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
             payment_method: form.payment_method,
             status: "completed",
           },
-          overrideBudgetId || null,
+          null,
+          budgetCategoryId || null,
         );
         toast.success("Transaksi berhasil ditambahkan");
       }
       setForm(emptyForm());
-      setOverrideBudgetId("");
+      setBudgetCategoryId("");
       onClose();
     } catch {
       toast.error(
@@ -338,31 +368,113 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
             </div>
           </div>
 
-          {/* Budget override */}
-          {isExpenseType && !isEdit && expenseBudgets.length > 0 && (
+          {/* Assign ke kategori budget */}
+          {hasBudgetOptions && (
             <div>
               <label className={cn(labelClass, "flex items-center gap-1.5")}>
                 <BookOpen size={11} className="text-accent" />
                 Masukkan ke budget
                 <span className="text-accent">(opsional)</span>
               </label>
-              <select
-                value={overrideBudgetId}
-                onChange={(e) => setOverrideBudgetId(e.target.value)}
-                className={inputClass}
-              >
-                <option value="">Otomatis (sesuai tanggal transaksi)</option>
-                {expenseBudgets.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {budgetLabel(b)}
-                  </option>
+
+              <div className="border border-border rounded-md divide-y divide-border max-h-64 overflow-y-auto">
+                {/* Opsi default: gak di-assign, tetap auto-match kayak biasa */}
+                <label className="flex items-center gap-2 px-3 py-2 text-xs cursor-pointer hover:bg-surface">
+                  <input
+                    type="radio"
+                    name="budgetCategoryId"
+                    checked={budgetCategoryId === ""}
+                    onChange={() => setBudgetCategoryId("")}
+                  />
+                  <span className="text-text-secondary">Otomatis (sesuai tanggal &amp; kategori)</span>
+                </label>
+
+                {relevantMonthly && weeklyChildren.length > 0 && (
+                  <div className="px-3 py-1.5 bg-surface text-[10px] font-semibold text-text-secondary uppercase tracking-wide">
+                    {MONTHS[(relevantMonthly.month ?? 1) - 1]} {relevantMonthly.year} · Budget Mingguan
+                  </div>
+                )}
+                {weeklyChildren.map((wb, i) => {
+                  const isCurrentWeek = weeklyCoversDate(wb, form.date);
+                  return (
+                    <div key={wb.id}>
+                      <div className={cn(
+                        "px-3 pt-2 pb-1 text-[10px] font-medium flex items-center gap-1.5",
+                        isCurrentWeek ? "text-text-primary" : "text-text-secondary",
+                      )}>
+                        Minggu {i + 1}
+                        {wb.start_date && wb.end_date && (
+                          <span className="text-accent font-normal">
+                            {new Date(wb.start_date).getDate()}–{new Date(wb.end_date).getDate()} {MONTHS[new Date(wb.end_date).getMonth()]}
+                          </span>
+                        )}
+                        {isCurrentWeek && (
+                          <span className="text-[9px] bg-success/15 text-success px-1.5 py-0.5 rounded-full">tgl transaksi masuk sini</span>
+                        )}
+                      </div>
+                      {wb.categories.map((c) => (
+                        <label key={c.id} className="flex items-center gap-2 pl-7 pr-3 py-1.5 text-xs cursor-pointer hover:bg-surface">
+                          <input
+                            type="radio"
+                            name="budgetCategoryId"
+                            checked={budgetCategoryId === c.id}
+                            onChange={() => setBudgetCategoryId(c.id)}
+                          />
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: c.color || "var(--accent)" }}
+                          />
+                          <span className="text-text-primary">{c.name}</span>
+                          <span className="text-accent ml-auto tabular-nums">
+                            {formatCurrency(c.actual_amount)} / {formatCurrency(c.planned_amount)}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  );
+                })}
+
+                {standaloneWeekly.map((wb) => (
+                  <div key={wb.id}>
+                    <div className="px-3 pt-2 pb-1 text-[10px] font-medium text-text-primary flex items-center gap-1.5">
+                      {wb.name}
+                      <span className="text-[9px] bg-success/15 text-success px-1.5 py-0.5 rounded-full">tgl transaksi masuk sini</span>
+                    </div>
+                    {wb.categories.map((c) => (
+                      <label key={c.id} className="flex items-center gap-2 pl-7 pr-3 py-1.5 text-xs cursor-pointer hover:bg-surface">
+                        <input type="radio" name="budgetCategoryId" checked={budgetCategoryId === c.id} onChange={() => setBudgetCategoryId(c.id)} />
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: c.color || "var(--accent)" }} />
+                        <span className="text-text-primary">{c.name}</span>
+                        <span className="text-accent ml-auto tabular-nums">
+                          {formatCurrency(c.actual_amount)} / {formatCurrency(c.planned_amount)}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
                 ))}
-              </select>
-              {selectedBudget && (
-                <p className="text-[10px] text-warning mt-1.5 flex items-center gap-1">
-                  ⚡ Dipotong dari budget{" "}
-                  <span className="font-semibold">{selectedBudget.name}</span>,
-                  bukan bulan tanggal transaksi.
+
+                {directMonthlyCats.length > 0 && (
+                  <div>
+                    <div className="px-3 pt-2 pb-1 text-[10px] font-medium text-text-secondary">
+                      Langsung ke budget bulanan (gak dipecah mingguan)
+                    </div>
+                    {directMonthlyCats.map((c) => (
+                      <label key={c.id} className="flex items-center gap-2 pl-7 pr-3 py-1.5 text-xs cursor-pointer hover:bg-surface">
+                        <input type="radio" name="budgetCategoryId" checked={budgetCategoryId === c.id} onChange={() => setBudgetCategoryId(c.id)} />
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: c.color || "var(--accent)" }} />
+                        <span className="text-text-primary">{c.name}</span>
+                        <span className="text-accent ml-auto tabular-nums">
+                          {formatCurrency(c.actual_amount)} / {formatCurrency(c.planned_amount)}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {budgetCategoryId && (
+                <p className="text-[10px] text-success mt-1.5">
+                  ✓ Dipotong langsung dari kategori ini, gak ambigu.
                 </p>
               )}
             </div>
