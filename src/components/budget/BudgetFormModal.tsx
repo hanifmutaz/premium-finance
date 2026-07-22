@@ -96,7 +96,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
   const [loadingParents, setLoadingParents] = useState(false);
 
   useEffect(() => {
-    if (period === "weekly" && !isEdit) {
+    if (period === "weekly") {
       setLoadingParents(true);
       getBudgets()
         .then((data) => {
@@ -107,7 +107,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
         .catch(() => { })
         .finally(() => setLoadingParents(false));
     }
-  }, [period, isEdit]);
+  }, [period]);
 
   // Budget mingguan lain yang rentang tanggalnya overlap sama yang lagi
   // diisi — kalau ada, transaksi bakal ke-hitung DOBEL di keduanya (lihat
@@ -131,14 +131,11 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
   const selectedParent = monthlyBudgets.find((b) => b.id === parentBudgetId);
   const parentCategories = selectedParent?.categories ?? [];
 
-  useEffect(() => {
-    if (!selectedParent || !weeklySourceCategory) return;
-    const cat = parentCategories.find((c) => c.name.toLowerCase() === weeklySourceCategory.toLowerCase());
-    if (cat) {
-      const remaining = Math.max(0, Number(cat.planned_amount) - Number(cat.actual_amount));
-      setTotalIncome(String(remaining));
-    }
-  }, [weeklySourceCategory, selectedParent]);
+  // NOTE: auto-fill totalIncome + auto-link kategori sekarang dilakuin
+  // langsung di onChange dropdown-nya (bukan react ke state lewat effect
+  // kayak dulu) — supaya waktu data lama di-hydrate pas Edit (parentBudgetId
+  // /weeklySourceCategory ke-set dari editData), ini GAK ikut ke-trigger dan
+  // gak nimpa total_income/parent link yang udah kesimpen bener.
 
   useEffect(() => {
     if (!editData) return;
@@ -208,6 +205,25 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
     } : c));
   }
 
+  // Dipanggil pas user MEMILIH (bukan pas hydration dari editData) kategori
+  // bulanan di section "Hubungkan ke Budget Bulanan". Sekali pilih di sini,
+  // SEMUA baris kategori mingguan di bawah otomatis ke-link ke kategori
+  // bulanan itu (gak perlu lagi konfigurasi satu-satu per baris) — user
+  // masih bisa override baris tertentu manual sesudahnya lewat dropdown
+  // "Bagian dari kategori bulanan" di baris itu kalau memang ada
+  // pengecualian.
+  function handleWeeklySourceCategoryChange(catName: string, catList: { id: string; name: string; planned_amount: number; actual_amount: number }[]) {
+    setWeeklySourceCategory(catName);
+    if (!catName) {
+      setCategories((prev) => prev.map((c) => ({ ...c, parent_budget_category_id: null })));
+      return;
+    }
+    const cat = catList.find((c) => c.name.toLowerCase() === catName.toLowerCase());
+    if (!cat) return;
+    setTotalIncome(String(Math.max(0, Number(cat.planned_amount) - Number(cat.actual_amount))));
+    setCategories((prev) => prev.map((c) => ({ ...c, parent_budget_category_id: cat.id })));
+  }
+
   function removeCategory(idx: number) {
     setCategories((prev) => prev.filter((_, i) => i !== idx));
   }
@@ -267,6 +283,8 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
           week: period === "weekly" ? budgetWeek : null,
           start_date: period === "weekly" ? startDate : null,
           end_date: period === "weekly" ? endDate : null,
+          parent_budget_id: period === "weekly" && parentBudgetId ? parentBudgetId : null,
+          weekly_source_category: period === "weekly" && weeklySourceCategory ? weeklySourceCategory : null,
           categories: cats.map((c) => ({
             id: c.id,
             name: c.name,
@@ -402,8 +420,9 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
             )}
           </div>
 
-          {/* Integrasi mingguan */}
-          {period === "weekly" && !isEdit && (
+          {/* Integrasi mingguan — bisa direconfigure pas Edit juga sekarang,
+              dulu section ini ilang total begitu budget-nya udah ke-save. */}
+          {period === "weekly" && (
             <div className="bg-surface border border-border rounded-lg p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <Link2 size={13} className="text-accent shrink-0" />
@@ -416,7 +435,11 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
                       <div>
                         <label className={lc}>Budget Bulanan</label>
                         <select className={cn(ic, "cursor-pointer")} value={parentBudgetId}
-                          onChange={(e) => { setParentBudgetId(e.target.value); setWeeklySourceCategory(""); }}>
+                          onChange={(e) => {
+                            setParentBudgetId(e.target.value);
+                            setWeeklySourceCategory("");
+                            setCategories((prev) => prev.map((c) => ({ ...c, parent_budget_category_id: null })));
+                          }}>
                           <option value="">— Tidak dihubungkan —</option>
                           {monthlyBudgets.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                         </select>
@@ -425,7 +448,7 @@ export function BudgetFormModal({ defaultPeriod, onClose, onAdded, editData }: P
                         <div>
                           <label className={lc}>Kategori yang dikhususkan untuk mingguan</label>
                           <select className={cn(ic, "cursor-pointer")} value={weeklySourceCategory}
-                            onChange={(e) => setWeeklySourceCategory(e.target.value)}>
+                            onChange={(e) => handleWeeklySourceCategoryChange(e.target.value, parentCategories)}>
                             <option value="">— Pilih kategori —</option>
                             {parentCategories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
                           </select>

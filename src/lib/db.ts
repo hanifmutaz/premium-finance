@@ -1304,6 +1304,10 @@ export async function updateBudget(id: string, budget: {
     name: string; total_income: number; notes?: string;
     year?: number; month?: number | null; week?: number | null;
     start_date?: string | null; end_date?: string | null;
+    // Dulu gak bisa diubah lagi sesudah budget mingguan dibikin — sekarang
+    // boleh, biar user bisa reconfigure/relink ke budget bulanan pas edit.
+    parent_budget_id?: string | null;
+    weekly_source_category?: string | null;
     categories: {
         id?: string; name: string; planned_amount: number; actual_amount?: number; color?: string;
         mapped_category_ids?: string[] | null;
