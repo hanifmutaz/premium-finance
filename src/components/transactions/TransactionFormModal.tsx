@@ -124,7 +124,12 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
     const d = new Date(pickerYear, pickerMonth - 1 + delta, 1);
     setPickerYear(d.getFullYear());
     setPickerMonth(d.getMonth() + 1);
-    setBudgetCategoryId(""); // kategori dari bulan lama gak relevan lagi begitu pindah bulan
+    // NOTE: budgetCategoryId sengaja TIDAK di-clear langsung di sini lagi.
+    // Dulu di-clear tiap geser bulan, tapi itu juga ngehapus assignment yang
+    // MASIH VALID kalau user cuma iseng geser buat liat-liat lalu balik lagi
+    // ke bulan yang sama, atau kalau kategori yang lagi ke-assign justru ada
+    // di bulan baru yang dituju. Validasi (masih ada di opsi bulan ini atau
+    // nggak) dilakuin di effect di bawah, sesudah `budgets` beneran ke-load.
   }
 
   // Pilih kategori budget dari picker + auto-isi field "Kategori" (buat
@@ -231,6 +236,61 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
     : [];
 
   const hasAnyBudgets = isExpenseType && budgets.some((b) => b.period === "monthly" || b.period === "weekly");
+
+  // Cari bulan/tahun ASLI tempat sebuah budget_category_id kepake, dengan
+  // nelusurin budgets yang udah ke-load. Weekly yang punya parent ikut bulan
+  // si induk (bulanan); weekly standalone ikut start_date/month-year-nya
+  // sendiri. Dipake buat betulin pickerMonth/pickerYear pas edit transaksi
+  // yang eksplisit ke-assign ke kategori di bulan LAIN dari tanggal
+  // transaksinya sendiri (fitur "beli tgl 30 Juni, potong budget Juli").
+  function findPeriodForCategory(catId: string, list: Budget[]): { year: number; month: number } | null {
+    const owner = list.find((b) => b.categories.some((c) => c.id === catId));
+    if (!owner) return null;
+    if (owner.period === "monthly" && owner.month) return { year: owner.year, month: owner.month };
+    if (owner.parent_budget_id) {
+      const parent = list.find((b) => b.id === owner.parent_budget_id);
+      if (parent && parent.month) return { year: parent.year, month: parent.month };
+    }
+    if (owner.start_date) {
+      const d = new Date(owner.start_date);
+      return { year: d.getFullYear(), month: d.getMonth() + 1 };
+    }
+    if (owner.month) return { year: owner.year, month: owner.month };
+    return null;
+  }
+
+  // Sekali budgets ke-load pas lagi edit transaksi yang punya budget_category_id
+  // eksplisit, betulin pickerMonth/Year ke bulan ASLI kategori itu (bukan
+  // sekadar bulan tanggal transaksi) — biar kategorinya kebaca "valid" dan
+  // gak ke-clear sama effect validasi di bawah.
+  useEffect(() => {
+    if (!open || !editData?.budget_category_id || budgets.length === 0) return;
+    const period = findPeriodForCategory(editData.budget_category_id, budgets);
+    if (period) {
+      setPickerYear(period.year);
+      setPickerMonth(period.month);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editData, budgets]);
+
+  // Validasi budgetCategoryId tiap kali bulan picker atau data budgets
+  // berubah. Cuma clear kalau kategori yang lagi ke-assign BENERAN gak ada di
+  // opsi bulan yang lagi ditampilin sekarang — bukan blind-clear kayak dulu.
+  // Skip selama budgets belum ke-load (array masih kosong) biar gak salah
+  // nge-clear assignment yang valid cuma gara-gara datanya belum nyampe.
+  useEffect(() => {
+    if (!budgetCategoryId) return;
+    if (budgets.length === 0) return;
+    const validIds = new Set([
+      ...weeklyChildren.flatMap((b) => b.categories.map((c) => c.id)),
+      ...standaloneWeekly.flatMap((b) => b.categories.map((c) => c.id)),
+      ...directMonthlyCats.map((c) => c.id),
+    ]);
+    if (!validIds.has(budgetCategoryId)) {
+      setBudgetCategoryId("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pickerMonth, pickerYear, budgets]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
