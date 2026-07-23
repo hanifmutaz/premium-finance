@@ -466,8 +466,8 @@ export async function deleteTransaction(id: string) {
     }
 
     // If this was a debt payment, remove the linked debt_payments row too.
-    // The sync_debt_payment trigger will automatically recalculate the debt's
-    // total_paid, installments_paid, and next_due_date after this delete.
+    // Trigger sync_debt_payment (migration 009) sekarang juga nyala pas
+    // delete, jadi debts.total_paid/status ikut direcalculate otomatis.
     if (tx && tx.type === "debt_payment" && tx.debt_id) {
         await supabase.from("debt_payments").delete().eq("transaction_id", id);
     }
@@ -510,6 +510,24 @@ export async function updateTransaction(
         } else {
             await syncBudgetActual(userId, data.category?.name ?? "", Number(data.amount), data.date, null, data.category_id ?? null, data.name ?? null);
         }
+    }
+
+    // Sync debt_payments row juga (trigger sync_debt_payment yang recalculate
+    // debts.total_paid/status). Reverse dulu row lama (kalau ada), baru insert
+    // row baru (kalau transaksi hasil edit-nya masih/jadi debt_payment dengan
+    // debt_id terisi). Delete + insert dipilih daripada update biasa supaya
+    // kasus debt_id berubah tetap trigger recalculate debt lama & baru dua-duanya.
+    if (original && original.type === "debt_payment" && original.debt_id) {
+        await supabase.from("debt_payments").delete().eq("transaction_id", id);
+    }
+    if (data.type === "debt_payment" && data.debt_id) {
+        const { error: dpError } = await supabase.from("debt_payments").insert({
+            debt_id: data.debt_id,
+            transaction_id: data.id,
+            amount: data.amount,
+            date: data.date,
+        });
+        if (dpError) throw dpError;
     }
 
     return data as Transaction;

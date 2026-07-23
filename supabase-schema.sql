@@ -763,3 +763,143 @@ begin
   );
 end;
 $$;
+
+-- ============================================================
+-- FIX: sync_debt_payment gak pernah jalan pas DELETE — lihat
+-- supabase/migrations/009_debt_payment_delete_sync.sql buat
+-- penjelasan lengkap. Aman dijalankan ulang di project yang
+-- sudah ada (cuma replace function + trigger, gak sentuh data).
+-- ============================================================
+
+create or replace function public.sync_debt_payment()
+returns trigger language plpgsql as $$
+declare
+  v_debt_id uuid := coalesce(new.debt_id, old.debt_id);
+begin
+  if v_debt_id is not null then
+    update public.debts
+    set
+      total_paid = (
+        select coalesce(sum(amount), 0)
+        from public.debt_payments
+        where debt_id = v_debt_id
+      ),
+      status = case
+        when (select coalesce(sum(amount), 0) from public.debt_payments where debt_id = v_debt_id) >= total_amount
+        then 'completed'
+        when due_date < current_date then 'overdue'
+        else 'active'
+      end
+    where id = v_debt_id;
+  end if;
+
+  if tg_op = 'UPDATE' and old.debt_id is distinct from new.debt_id and old.debt_id is not null then
+    update public.debts
+    set
+      total_paid = (
+        select coalesce(sum(amount), 0) from public.debt_payments where debt_id = old.debt_id
+      ),
+      status = case
+        when (select coalesce(sum(amount), 0) from public.debt_payments where debt_id = old.debt_id) >= total_amount
+        then 'completed'
+        when due_date < current_date then 'overdue'
+        else 'active'
+      end
+    where id = old.debt_id;
+  end if;
+
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists trg_sync_debt_payment on public.debt_payments;
+create trigger trg_sync_debt_payment
+  after insert or update or delete on public.debt_payments
+  for each row execute procedure public.sync_debt_payment();
+
+-- ============================================================
+-- FIX: installments_paid & next_due_date gak pernah direcalculate
+-- pas ada pembayaran cicilan. Lihat
+-- supabase/migrations/010_debt_installment_progress_sync.sql buat
+-- penjelasan lengkap. Aman dijalankan ulang di project yang sudah
+-- ada.
+-- ============================================================
+
+create or replace function public.sync_debt_payment()
+returns trigger language plpgsql as $$
+declare
+  v_debt_id     uuid := coalesce(new.debt_id, old.debt_id);
+  v_old_debt_id uuid := old.debt_id;
+begin
+  if v_debt_id is not null then
+    update public.debts
+    set
+      total_paid = (
+        select coalesce(sum(amount), 0)
+        from public.debt_payments
+        where debt_id = v_debt_id
+      ),
+      status = case
+        when (select coalesce(sum(amount), 0) from public.debt_payments where debt_id = v_debt_id) >= total_amount
+        then 'completed'
+        when due_date < current_date then 'overdue'
+        else 'active'
+      end,
+      installments_paid = case
+        when is_installment
+        then (select count(*) from public.debt_payments where debt_id = v_debt_id)
+        else installments_paid
+      end,
+      next_due_date = case
+        when is_installment
+        then (due_date + (make_interval(months => (select count(*)::int from public.debt_payments where debt_id = v_debt_id))))::date
+        else next_due_date
+      end
+    where id = v_debt_id;
+  end if;
+
+  if tg_op = 'UPDATE' and v_old_debt_id is distinct from new.debt_id and v_old_debt_id is not null then
+    update public.debts
+    set
+      total_paid = (
+        select coalesce(sum(amount), 0) from public.debt_payments where debt_id = v_old_debt_id
+      ),
+      status = case
+        when (select coalesce(sum(amount), 0) from public.debt_payments where debt_id = v_old_debt_id) >= total_amount
+        then 'completed'
+        when due_date < current_date then 'overdue'
+        else 'active'
+      end,
+      installments_paid = case
+        when is_installment
+        then (select count(*) from public.debt_payments where debt_id = v_old_debt_id)
+        else installments_paid
+      end,
+      next_due_date = case
+        when is_installment
+        then (due_date + (make_interval(months => (select count(*)::int from public.debt_payments where debt_id = v_old_debt_id))))::date
+        else next_due_date
+      end
+    where id = v_old_debt_id;
+  end if;
+
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists trg_sync_debt_payment on public.debt_payments;
+create trigger trg_sync_debt_payment
+  after insert or update or delete on public.debt_payments
+  for each row execute procedure public.sync_debt_payment();
+
+update public.debts d
+set
+  installments_paid = coalesce(dp.cnt, 0),
+  next_due_date = (d.due_date + make_interval(months => coalesce(dp.cnt, 0)::int))::date
+from (
+  select debt_id, count(*) as cnt
+  from public.debt_payments
+  group by debt_id
+) dp
+where d.id = dp.debt_id
+  and d.is_installment = true;
