@@ -13,8 +13,8 @@ const CATEGORY_COLORS = [
 ];
 
 const PRESET_CATEGORIES_MONTHLY = [
-  "Makan & Minum", "Transport", "Kost / Sewa", "Bayar Utang",
-  "Tabungan", "Belanja", "Langganan", "Lainnya",
+  "Motor", "Belanja", "Kost", "UKT",
+  "Minggu 1", "Minggu 2", "Minggu 3", "Minggu 4",
 ];
 const PRESET_CATEGORIES_WEEKLY = [
   "Transport", "Roko", "Kopi", "Lainnya",
