@@ -16,6 +16,7 @@ import {
   addCategory,
   getAccounts,
   getBudgets,
+  getDebts,
 } from "@/lib/db";
 import type {
   Transaction,
@@ -23,6 +24,7 @@ import type {
   PaymentMethod,
   AccountWithBalance,
   Budget,
+  Debt,
 } from "@/types";
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string }[] = [
@@ -78,8 +80,10 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
   );
   const [accounts, setAccounts] = useState<AccountWithBalance[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
+  const [debts, setDebts] = useState<Debt[]>([]);
   const [form, setForm] = useState(emptyForm());
   const [budgetCategoryId, setBudgetCategoryId] = useState<string>("");
+  const [debtId, setDebtId] = useState<string>("");
   const [categoryAutoFilled, setCategoryAutoFilled] = useState(false);
   // Periode budget yang lagi ditampilin di picker — SENGAJA independen dari
   // form.date. Kasus nyata: belanja bulanan tgl 30 Juni itu transaksinya
@@ -105,6 +109,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
         payment_method: editData.payment_method,
       });
       setBudgetCategoryId(editData.budget_category_id ?? "");
+      setDebtId(editData.debt_id ?? "");
       setCategoryAutoFilled(false);
       const d = new Date(editData.date);
       setPickerYear(d.getFullYear());
@@ -113,6 +118,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
       setType("expense");
       setForm(emptyForm());
       setBudgetCategoryId("");
+      setDebtId("");
       setCategoryAutoFilled(false);
       const d = new Date();
       setPickerYear(d.getFullYear());
@@ -158,14 +164,14 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
     if (open)
       getAccounts()
         .then(setAccounts)
-        .catch(() => {});
+        .catch(() => { });
   }, [open]);
 
   useEffect(() => {
     if (open) {
       getCategories(type === "income" ? "income" : "expense")
         .then(setCategories)
-        .catch(() => {});
+        .catch(() => { });
     }
   }, [open, type]);
 
@@ -173,12 +179,24 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
     if (open && (type === "expense" || type === "debt_payment")) {
       getBudgets()
         .then((data) => setBudgets(data as Budget[]))
-        .catch(() => {});
+        .catch(() => { });
     }
   }, [open, type]);
 
   useEffect(() => {
     if (type !== "expense" && type !== "debt_payment") setBudgetCategoryId("");
+  }, [type]);
+
+  useEffect(() => {
+    if (open && type === "debt_payment") {
+      getDebts()
+        .then((data) => setDebts(data.filter((d) => d.status !== "completed")))
+        .catch(() => { });
+    }
+  }, [open, type]);
+
+  useEffect(() => {
+    if (type !== "debt_payment") setDebtId("");
   }, [type]);
 
   function handleAmountChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -303,6 +321,10 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
       toast.error("Nominal tidak valid");
       return;
     }
+    if (type === "debt_payment" && !debtId) {
+      toast.error("Pilih utang yang dibayar dulu");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -318,6 +340,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
           date: form.date,
           payment_method: form.payment_method,
           budget_category_id: budgetCategoryId || null,
+          debt_id: type === "debt_payment" ? debtId || undefined : undefined,
         });
         toast.success("Transaksi berhasil diperbarui");
       } else {
@@ -333,6 +356,7 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
             date: form.date,
             payment_method: form.payment_method,
             status: "completed",
+            debt_id: type === "debt_payment" ? debtId || undefined : undefined,
           },
           null,
           budgetCategoryId || null,
@@ -487,6 +511,37 @@ export function TransactionFormModal({ open, onClose, editData }: Props) {
               </select>
             </div>
           </div>
+
+          {/* Pilih utang — wajib biar debts.total_paid/remaining ke-update
+              (lewat debt_payments + trigger sync_debt_payment). Tanpa ini,
+              transaksi cuma kepotong dari budget tapi data utang gak nyambung. */}
+          {type === "debt_payment" && (
+            <div>
+              <label className={labelClass}>Utang yang Dibayar *</label>
+              <select
+                value={debtId}
+                onChange={(e) => setDebtId(e.target.value)}
+                className={inputClass}
+              >
+                <option value="">Pilih utang</option>
+                {debts.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} ({d.lender}) — sisa {formatCurrency(Number(d.remaining))}
+                  </option>
+                ))}
+              </select>
+              {debts.length === 0 && (
+                <p className="text-[11px] text-accent italic mt-1">
+                  Belum ada utang aktif. Tambah dulu di halaman Utang.
+                </p>
+              )}
+              {!debtId && debts.length > 0 && (
+                <p className="text-[11px] text-accent mt-1">
+                  Tanpa pilih utang, data di halaman Utang gak ke-update — cuma budget yang kepotong.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Assign ke kategori budget */}
           {hasAnyBudgets && (
