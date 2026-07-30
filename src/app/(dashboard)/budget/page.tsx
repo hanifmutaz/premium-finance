@@ -40,7 +40,13 @@ export default function BudgetPage() {
 
   useEffect(() => { load(); }, []);
 
-  const filtered = budgets.filter((b) => b.period === tab);
+  const filtered = budgets
+    .filter((b) => b.period === tab)
+    .sort((a, b) => {
+      const remainingA = Number(a.total_planned) - Number(a.total_actual);
+      const remainingB = Number(b.total_planned) - Number(b.total_actual);
+      return remainingB - remainingA;
+    });
 
   // Map budget ID -> name untuk lookup parent
   const budgetNameMap = Object.fromEntries(budgets.map((b) => [b.id, b.name]));
