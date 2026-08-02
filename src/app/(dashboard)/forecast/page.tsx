@@ -87,8 +87,11 @@ export default function ForecastPage() {
     load();
   }, []);
 
+  // "Aktif" = active + overdue, samain sama definisi di /debts. Kalau cuma
+  // "active" doang, utang yang telat gak ke-hitung dan proyeksi 12 bulan
+  // jadi keliatan lebih optimis dari kenyataan.
   const totalDebt = debts
-    .filter((d) => d.status === "active")
+    .filter((d) => d.status === "active" || d.status === "overdue")
     .reduce((s, d) => s + Number(d.remaining), 0);
 
   const forecast = useMemo(
@@ -182,11 +185,10 @@ export default function ForecastPage() {
               <button
                 key={s}
                 onClick={() => setScenario(s)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                  scenario === s
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${scenario === s
                     ? "bg-text-primary text-background"
                     : "border border-border text-text-secondary hover:text-text-primary"
-                }`}
+                  }`}
               >
                 {s === "best" ? "Skenario Terbaik" : s === "normal" ? "Skenario Normal" : "Skenario Terburuk"}
               </button>

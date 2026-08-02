@@ -9,7 +9,9 @@ import { addMonths, format } from "date-fns";
 // udah kegantikan sama getDebtFreedomStats() di src/lib/db/debts.ts, yang
 // ngitung pace dari rata-rata pembayaran 3 bulan terakhir.
 export function calcTotalDebt(debts: Debt[]) {
-  return debts.filter((d) => d.status === "active").reduce((sum, d) => sum + d.remaining, 0);
+  return debts
+    .filter((d) => d.status === "active" || d.status === "overdue")
+    .reduce((sum, d) => sum + d.remaining, 0);
 }
 
 // ─── Goal Calculations ────────────────────────────────────────────────────────

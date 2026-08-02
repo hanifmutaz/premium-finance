@@ -17,12 +17,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    // Get total active debt from DB
+    // Get total active debt from DB — "aktif" = active + overdue, samain
+    // sama definisi di /debts biar konsisten sama sisi client.
     const { data: debts } = await supabase
       .from("debts")
       .select("remaining")
       .eq("user_id", user.id)
-      .eq("status", "active");
+      .in("status", ["active", "overdue"]);
 
     const totalDebt = (debts ?? []).reduce((s: number, d: { remaining: number }) => s + d.remaining, 0);
 

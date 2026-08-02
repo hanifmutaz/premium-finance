@@ -39,13 +39,14 @@ function makeWishlist(overrides: Partial<Wishlist> = {}): Wishlist {
 }
 
 describe("calcTotalDebt", () => {
-    it("sums remaining only for active debts", () => {
+    it("sums remaining for both active and overdue debts", () => {
         const debts = [
             makeDebt({ id: "1", remaining: 1_000_000, status: "active" }),
             makeDebt({ id: "2", remaining: 500_000, status: "completed" }),
             makeDebt({ id: "3", remaining: 300_000, status: "active" }),
+            makeDebt({ id: "4", remaining: 200_000, status: "overdue" }),
         ];
-        expect(calcTotalDebt(debts)).toBe(1_300_000);
+        expect(calcTotalDebt(debts)).toBe(1_500_000);
     });
 
     it("returns 0 for an empty list", () => {
