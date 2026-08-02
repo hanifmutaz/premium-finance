@@ -131,7 +131,18 @@ export async function updateReceivable(id: string, recv: {
 
     const { data, error } = await supabase
         .from("receivables")
-        .update({ ...recv, updated_at: new Date().toISOString() })
+        .update({
+            ...recv,
+            // Samain status "completed" ulang terhadap total_amount BARU —
+            // sama bug class-nya kayak goals: kalau gak di-recheck, piutang
+            // yang udah "completed" bisa nyangkut statusnya pas total_amount
+            // dinaikin (padahal sisa yang harus diterima balik lagi >0).
+            // "overdue" sengaja gak disentuh — itu status manual/waktu.
+            ...(existing.status === "active" || existing.status === "completed"
+                ? { status: Number(existing.total_received) >= Number(recv.total_amount) ? "completed" : "active" }
+                : {}),
+            updated_at: new Date().toISOString(),
+        })
         .eq("id", id)
         .select("*, account:accounts(*)")
         .single();
@@ -159,4 +170,3 @@ export async function updateReceivable(id: string, recv: {
 
     return data as Receivable;
 }
-
