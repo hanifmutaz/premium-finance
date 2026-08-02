@@ -39,6 +39,10 @@ export function GoalFormModal({ open, onClose, editData }: Props) {
       toast.error("Nama, target nominal, dan deadline wajib diisi");
       return;
     }
+    if (parseFloat(form.target_amount) <= 0) {
+      toast.error("Target nominal harus lebih dari 0");
+      return;
+    }
     setLoading(true);
     try {
       const payload = {
@@ -83,7 +87,7 @@ export function GoalFormModal({ open, onClose, editData }: Props) {
             <label className="block text-xs text-text-secondary mb-1.5">Target Nominal *</label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-accent text-sm">Rp</span>
-              <input type="number" value={form.target_amount} onChange={(e) => setForm({ ...form, target_amount: e.target.value })}
+              <input type="number" min="1" value={form.target_amount} onChange={(e) => setForm({ ...form, target_amount: e.target.value })}
                 placeholder="0"
                 className="w-full bg-input border border-border rounded-md pl-9 pr-3 py-2.5 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent transition-colors tabular-nums" />
             </div>

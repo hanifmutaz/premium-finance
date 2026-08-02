@@ -42,6 +42,10 @@ export function WishlistFormModal({ open, onClose, editData }: Props) {
       toast.error("Nama dan harga wajib diisi");
       return;
     }
+    if (parseFloat(form.price) <= 0) {
+      toast.error("Harga harus lebih dari 0");
+      return;
+    }
     setLoading(true);
     try {
       const payload = {
@@ -95,7 +99,7 @@ export function WishlistFormModal({ open, onClose, editData }: Props) {
               <label className="block text-xs text-text-secondary mb-1.5">Harga *</label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-accent text-xs">Rp</span>
-                <input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })}
+                <input type="number" min="1" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })}
                   placeholder="0"
                   className="w-full bg-input border border-border rounded-md pl-8 pr-3 py-2.5 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent transition-colors tabular-nums" />
               </div>

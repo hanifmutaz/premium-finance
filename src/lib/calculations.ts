@@ -3,31 +3,28 @@ import { scoreToGrade } from "@/utils";
 import { addMonths, format } from "date-fns";
 
 // ─── Debt Calculations ────────────────────────────────────────────────────────
-export function calcDebtProgress(debt: Debt) {
-  const percentage = debt.total_amount > 0 ? (debt.total_paid / debt.total_amount) * 100 : 0;
-  const monthsRemaining = Math.ceil(debt.remaining / 875000); // avg payment
-  const estimatedFinish = addMonths(new Date(), monthsRemaining);
-  return {
-    percentage: Math.min(percentage, 100),
-    estimatedFinish: format(estimatedFinish, "MMM yyyy"),
-    monthsRemaining,
-  };
-}
-
+// NOTE: calcDebtProgress() dulu ada di sini, tapi udah dihapus — dead code,
+// gak dipanggil di mana pun, dan pake angka hardcode (Rp875.000/bulan) buat
+// estimasi bulan tersisa, bukan dari histori pembayaran beneran. Fungsi ini
+// udah kegantikan sama getDebtFreedomStats() di src/lib/db/debts.ts, yang
+// ngitung pace dari rata-rata pembayaran 3 bulan terakhir.
 export function calcTotalDebt(debts: Debt[]) {
   return debts.filter((d) => d.status === "active").reduce((sum, d) => sum + d.remaining, 0);
 }
 
 // ─── Goal Calculations ────────────────────────────────────────────────────────
 export function calcGoalProgress(goal: Goal) {
-  const percentage = (goal.current_amount / goal.target_amount) * 100;
+  // Guard: target_amount bisa 0 kalau form belum divalidasi dengan benar
+  // (lihat GoalFormModal — sekarang dikasih min="1"). Tanpa guard ini,
+  // percentage jadi Infinity/NaN dan nongol mentah di UI.
+  const percentage = goal.target_amount > 0 ? (goal.current_amount / goal.target_amount) * 100 : 0;
   const remaining = goal.target_amount - goal.current_amount;
   const deadlineDate = new Date(goal.deadline);
   const today = new Date();
   const monthsLeft = Math.max(
     1,
     (deadlineDate.getFullYear() - today.getFullYear()) * 12 +
-      (deadlineDate.getMonth() - today.getMonth())
+    (deadlineDate.getMonth() - today.getMonth())
   );
   const monthlyNeeded = remaining / monthsLeft;
   const weeklyNeeded = monthlyNeeded / 4;
@@ -48,16 +45,18 @@ export function calcWishlistProgress(
   item: Wishlist,
   monthlySurplus: number
 ) {
+  // Guard: price bisa 0 kalau form belum divalidasi dengan benar (lihat
+  // WishlistFormModal — sekarang dikasih min="1").
   const remaining = Math.max(0, item.price - item.saved_amount);
-  const percentage = (item.saved_amount / item.price) * 100;
+  const percentage = item.price > 0 ? (item.saved_amount / item.price) * 100 : 0;
   const monthsNeeded = monthlySurplus > 0 ? Math.ceil(remaining / monthlySurplus) : Infinity;
   const estimatedDate = monthsNeeded < Infinity ? addMonths(new Date(), monthsNeeded) : null;
   const canBuy = item.saved_amount >= item.price;
   const recommendation = canBuy
     ? "Siap dibeli! Saldo sudah cukup."
     : monthsNeeded <= 3
-    ? "Tunda dulu, hampir tercapai dalam waktu dekat."
-    : "Tunda dan terus menabung secara konsisten.";
+      ? "Tunda dulu, hampir tercapai dalam waktu dekat."
+      : "Tunda dan terus menabung secara konsisten.";
 
   return {
     remaining,
@@ -148,16 +147,18 @@ export function calculateHealthScore(params: {
   const activeGoals = goals.filter((g) => g.status === "active");
   const avgProgress =
     activeGoals.length > 0
-      ? activeGoals.reduce((sum, g) => sum + (g.current_amount / g.target_amount) * 100, 0) /
-        activeGoals.length
+      ? activeGoals.reduce(
+        (sum, g) => sum + (g.target_amount > 0 ? (g.current_amount / g.target_amount) * 100 : 0),
+        0
+      ) / activeGoals.length
       : 50;
 
   const totalScore = Math.round(
     debtScore * 0.25 +
-      savingsScore * 0.25 +
-      expenseScore * 0.2 +
-      cashflowStability * 0.2 +
-      avgProgress * 0.1
+    savingsScore * 0.25 +
+    expenseScore * 0.2 +
+    cashflowStability * 0.2 +
+    avgProgress * 0.1
   );
 
   const grade = scoreToGrade(totalScore);
