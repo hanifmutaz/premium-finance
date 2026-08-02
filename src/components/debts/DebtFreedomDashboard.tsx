@@ -10,12 +10,16 @@ import { simulateExtraPayment } from "@/lib/debt-freedom";
 export function DebtFreedomDashboard() {
     const [stats, setStats] = useState<DebtFreedomStats | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [extraDisplay, setExtraDisplay] = useState("");
 
     useEffect(() => {
         getDebtFreedomStats()
-            .then(setStats)
-            .catch(() => setStats(null))
+            .then((s) => { setStats(s); setError(null); })
+            .catch((err) => {
+                console.error("[DebtFreedomDashboard]", err);
+                setError(err instanceof Error ? err.message : "Gagal memuat data");
+            })
             .finally(() => setLoading(false));
     }, []);
 
@@ -35,6 +39,14 @@ export function DebtFreedomDashboard() {
         return (
             <div className="bg-surface-card border border-border rounded-xl p-5">
                 <div className="h-24 flex items-center justify-center text-sm text-text-secondary">Memuat progres bebas utang...</div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="bg-surface-card border border-border rounded-xl p-5">
+                <p className="text-xs text-danger">Gagal memuat Debt Freedom Dashboard: {error}</p>
             </div>
         );
     }
