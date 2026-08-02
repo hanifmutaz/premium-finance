@@ -126,16 +126,7 @@ export function parseInputNumber(display: string): string {
 }
 
 // ─── Debt status ────────────────────────────────────────────────────────────
-/**
- * Satu sumber kebenaran buat "utang aktif": active DAN overdue, karena
- * keduanya masih punya sisa yang harus dibayar. Sebelum ini, definisi
- * "aktif" ke-duplikasi manual di banyak tempat (halaman debts, forecast,
- * dashboard, db layer) — beberapa sempat lupa masukin "overdue" dan bikin
- * angka beda-beda antar halaman. Pakai helper ini, jangan tulis ulang
- * `status === "active" || status === "overdue"` di tempat baru.
- *
- * `ACTIVE_DEBT_STATUSES` versi array-nya buat query Supabase `.in("status", ...)`.
- */
+
 export const ACTIVE_DEBT_STATUSES = ["active", "overdue"] as const;
 
 export function isDebtActive(status: string): boolean {

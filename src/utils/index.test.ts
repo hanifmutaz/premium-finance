@@ -16,9 +16,6 @@ import {
 
 describe("formatCurrency", () => {
   it("formats a whole number as IDR with no decimals", () => {
-    // Node's ICU may render a regular space or non-breaking space (\u00A0)
-    // between "Rp" and the digits depending on the Node/ICU version — strip
-    // whitespace before comparing so the test isn't environment-fragile.
     expect(formatCurrency(12500000).replace(/\s/g, "")).toBe("Rp12.500.000");
   });
 
@@ -55,14 +52,6 @@ describe("parseCurrency", () => {
     expect(parseCurrency("")).toBe(0);
   });
 
-  // KNOWN BUG (documented, not fixed here — function is currently unused
-  // anywhere in the app, so this is dead code with a latent issue rather
-  // than an active one): parseFloat stops at the second "." it encounters,
-  // so a real Rupiah-formatted string like "Rp12.500.000" parses to 12.5
-  // instead of 12500000. If this function is ever wired up to parse
-  // dot-separated IDR input, it needs to strip thousand-separator dots
-  // first (see formatInputNumber/parseInputNumber below, which handle
-  // this correctly via digit-only stripping).
   it("does NOT correctly parse dot-formatted IDR strings (documents existing bug)", () => {
     expect(parseCurrency("Rp12.500.000")).toBe(12.5);
   });

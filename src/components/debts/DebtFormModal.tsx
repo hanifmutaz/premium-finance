@@ -164,20 +164,37 @@ export function DebtFormModal({ open, onClose, editData }: Props) {
                     className="w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm text-text-primary placeholder:text-accent focus:outline-none focus:border-accent transition-colors tabular-nums" />
                 </div>
               </div>
-              {form.installment_amount && form.tenor_months && (
-                <div className="flex items-center justify-between text-xs pt-1 border-t border-border">
-                  <span className="text-text-secondary">Total otomatis dihitung</span>
-                  <span className="font-semibold text-text-primary tabular-nums">
-                    Rp {(parseFloat(form.installment_amount || "0") * parseInt(form.tenor_months || "0")).toLocaleString("id-ID")}
-                  </span>
-                </div>
-              )}
+              {form.installment_amount && form.tenor_months && (() => {
+                const calculatedTotal = parseFloat(form.installment_amount || "0") * parseInt(form.tenor_months || "0");
+                const currentTotal = parseFloat(form.total_amount || "0");
+                const isSynced = calculatedTotal === currentTotal;
+                return (
+                  <div className="flex items-center justify-between text-xs pt-1 border-t border-border gap-2">
+                    <span className="text-text-secondary">Cicilan × Tenor</span>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-text-primary tabular-nums">
+                        Rp {calculatedTotal.toLocaleString("id-ID")}
+                      </span>
+                      {isEdit && !isSynced && (
+                        <button
+                          type="button"
+                          onClick={() => setForm((f) => ({ ...f, total_amount: String(calculatedTotal) }))}
+                          className="text-[10px] font-medium text-accent hover:underline shrink-0"
+                        >
+                          Samakan ke Total
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
           <div>
             <label className="block text-xs text-text-secondary mb-1.5">
-              Total Utang * {showInstallment && <span className="text-accent">(auto dari cicilan × tenor)</span>}
+              Total Utang * {showInstallment && !isEdit && <span className="text-accent">(auto dari cicilan × tenor)</span>}
+              {showInstallment && isEdit && <span className="text-warning">(manual — pakai tombol &quot;Samakan ke Total&quot; kalau mau ikutin cicilan × tenor)</span>}
             </label>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-accent text-sm">Rp</span>

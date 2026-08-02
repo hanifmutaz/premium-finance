@@ -50,9 +50,21 @@ export async function updateGoal(id: string, goal: {
     priority: string; notes?: string;
 }) {
     const { supabase } = await getSupabaseUser();
+
+    // Samain status "completed" ulang terhadap target_amount BARU — kalau
+    // gak, goal yang udah "completed" bisa nyangkut status-nya pas
+    // target_amount dinaikin (jadi belum lunas beneran), atau sebaliknya
+    // tetep "active" padahal target diturunin di bawah tabungan yang udah
+    // kekumpul. Sama logic-nya kayak di updateGoalAmount().
+    const { data: existing } = await supabase.from("goals").select("current_amount, status").eq("id", id).single();
+    const status =
+        existing && (existing.status === "active" || existing.status === "completed")
+            ? (Number(existing.current_amount) >= Number(goal.target_amount) ? "completed" : "active")
+            : undefined;
+
     const { data, error } = await supabase
         .from("goals")
-        .update({ ...goal, updated_at: new Date().toISOString() })
+        .update({ ...goal, ...(status ? { status } : {}), updated_at: new Date().toISOString() })
         .eq("id", id)
         .select()
         .single();
@@ -65,4 +77,3 @@ export async function deleteGoal(id: string) {
     const { error } = await supabase.from("goals").delete().eq("id", id);
     if (error) throw error;
 }
-
