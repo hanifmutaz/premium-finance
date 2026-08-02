@@ -1,4 +1,4 @@
-import { getSupabaseUser } from "./db/client";
+import { getSupabaseUser } from "./client";
 import type { Notification } from "@/types";
 
 // ─── Notifications ──────────────────────────────────────────────────────────
