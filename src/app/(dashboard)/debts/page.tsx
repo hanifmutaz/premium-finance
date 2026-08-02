@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { DebtPaymentModal } from "@/components/debts/DebtPaymentModal";
 import { DebtFormModal } from "@/components/debts/DebtFormModal";
+import { DebtFreedomDashboard } from "@/components/debts/DebtFreedomDashboard";
 import { getDebts, deleteDebt } from "@/lib/db";
 import { toast } from "sonner";
 import type { Debt } from "@/types";
@@ -296,6 +297,9 @@ export default function DebtsPage() {
           <Plus size={13} /> Tambah Utang
         </button>
       </div>
+
+      {/* Debt Freedom Dashboard */}
+      <DebtFreedomDashboard />
 
       {/* Stats row */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
