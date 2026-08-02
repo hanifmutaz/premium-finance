@@ -11,6 +11,7 @@ import {
   getInitials,
   formatInputNumber,
   parseInputNumber,
+  isDebtActive,
 } from "./index";
 
 describe("formatCurrency", () => {
@@ -162,5 +163,20 @@ describe("formatInputNumber / parseInputNumber round-trip", () => {
     const raw = "12500000";
     const display = formatInputNumber(raw);
     expect(parseInputNumber(display)).toBe(raw);
+  });
+});
+
+describe("isDebtActive", () => {
+  it("treats 'active' as active", () => {
+    expect(isDebtActive("active")).toBe(true);
+  });
+  it("treats 'overdue' as active (still has a balance owed)", () => {
+    expect(isDebtActive("overdue")).toBe(true);
+  });
+  it("treats 'completed' as NOT active", () => {
+    expect(isDebtActive("completed")).toBe(false);
+  });
+  it("treats unknown status strings as NOT active", () => {
+    expect(isDebtActive("cancelled")).toBe(false);
   });
 });

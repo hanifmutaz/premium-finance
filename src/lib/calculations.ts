@@ -1,5 +1,5 @@
 import type { Debt, Goal, Wishlist, ForecastInput, ForecastResult, FinancialScore } from "@/types";
-import { scoreToGrade } from "@/utils";
+import { scoreToGrade, isDebtActive } from "@/utils";
 import { addMonths, format } from "date-fns";
 
 // ─── Debt Calculations ────────────────────────────────────────────────────────
@@ -10,7 +10,7 @@ import { addMonths, format } from "date-fns";
 // ngitung pace dari rata-rata pembayaran 3 bulan terakhir.
 export function calcTotalDebt(debts: Debt[]) {
   return debts
-    .filter((d) => d.status === "active" || d.status === "overdue")
+    .filter((d) => isDebtActive(d.status))
     .reduce((sum, d) => sum + d.remaining, 0);
 }
 

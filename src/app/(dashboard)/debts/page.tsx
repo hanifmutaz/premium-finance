@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
 import { Plus, CreditCard, CheckCircle2, Trash2, Pencil, Repeat, Calendar, AlertCircle } from "lucide-react";
-import { formatCurrency, formatDate, calculateProgress, daysUntil, cn } from "@/utils";
+import { formatCurrency, formatDate, calculateProgress, daysUntil, isDebtActive, cn } from "@/utils";
 import { PriorityBadge } from "@/components/shared/Badges";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
@@ -130,7 +130,7 @@ function InstallmentCard({
       </div>
 
       {/* Action */}
-      {(debt.status === "active" || debt.status === "overdue") && (
+      {isDebtActive(debt.status) && (
         <div className="px-5 py-3 border-t border-border">
           <button onClick={onPay}
             className="w-full py-2 text-xs font-medium text-text-secondary border border-border rounded-lg hover:border-text-primary hover:text-text-primary transition-colors flex items-center justify-center gap-1.5">
@@ -229,7 +229,7 @@ function DebtCard({
       </div>
 
       {/* Action */}
-      {(debt.status === "active" || debt.status === "overdue") && (
+      {isDebtActive(debt.status) && (
         <div className="px-5 py-3 border-t border-border">
           <button onClick={onPay}
             className="w-full py-2 text-xs font-medium text-text-secondary border border-border rounded-lg hover:border-text-primary hover:text-text-primary transition-colors flex items-center justify-center gap-1.5">
@@ -260,7 +260,7 @@ export default function DebtsPage() {
 
   useEffect(() => { load(); }, []);
 
-  const active = debts.filter((d) => d.status === "active" || d.status === "overdue");
+  const active = debts.filter((d) => isDebtActive(d.status));
   const completed = debts.filter((d) => d.status === "completed");
   const displayed = tab === "active" ? active : completed;
   const totalDebt = active.reduce((s, d) => s + Number(d.remaining), 0);

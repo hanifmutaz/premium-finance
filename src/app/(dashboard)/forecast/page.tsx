@@ -6,7 +6,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import { TrendingUp, Calendar, Target, RefreshCw } from "lucide-react";
-import { formatCurrency, formatDate } from "@/utils";
+import { formatCurrency, formatDate, isDebtActive } from "@/utils";
 import { generateForecast } from "@/lib/calculations";
 import { getDebts, getForecastDefaults } from "@/lib/db";
 import type { ForecastInput, Debt } from "@/types";
@@ -87,11 +87,8 @@ export default function ForecastPage() {
     load();
   }, []);
 
-  // "Aktif" = active + overdue, samain sama definisi di /debts. Kalau cuma
-  // "active" doang, utang yang telat gak ke-hitung dan proyeksi 12 bulan
-  // jadi keliatan lebih optimis dari kenyataan.
   const totalDebt = debts
-    .filter((d) => d.status === "active" || d.status === "overdue")
+    .filter((d) => isDebtActive(d.status))
     .reduce((s, d) => s + Number(d.remaining), 0);
 
   const forecast = useMemo(

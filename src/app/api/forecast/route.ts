@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { generateForecast } from "@/lib/calculations";
+import { ACTIVE_DEBT_STATUSES } from "@/utils";
 
 export async function POST(req: NextRequest) {
   try {
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
       .from("debts")
       .select("remaining")
       .eq("user_id", user.id)
-      .in("status", ["active", "overdue"]);
+      .in("status", ACTIVE_DEBT_STATUSES);
 
     const totalDebt = (debts ?? []).reduce((s: number, d: { remaining: number }) => s + d.remaining, 0);
 

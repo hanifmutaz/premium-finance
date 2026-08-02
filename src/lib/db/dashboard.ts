@@ -1,4 +1,5 @@
 import { getSupabaseUser } from "./client";
+import { ACTIVE_DEBT_STATUSES } from "@/utils";
 import type { Debt } from "@/types";
 // ─── Dashboard stats ──────────────────────────────────────────────────────────
 export async function getDashboardStats(year?: number, month?: number) {
@@ -22,7 +23,7 @@ export async function getDashboardStats(year?: number, month?: number) {
             .eq("user_id", userId).gte("date", firstDay).lte("date", lastDay),
         supabase.from("transactions").select("type, amount")
             .eq("user_id", userId).gte("date", prevFirstDay).lte("date", prevLastDay),
-        supabase.from("debts").select("*").eq("user_id", userId).in("status", ["active", "overdue"]),
+        supabase.from("debts").select("*").eq("user_id", userId).in("status", ACTIVE_DEBT_STATUSES),
         supabase.from("receivables").select("*").eq("user_id", userId).eq("status", "active"),
     ]);
 
@@ -172,4 +173,3 @@ export async function getExpenseByAccount(year?: number, month?: number): Promis
         .map(([account_id, v]) => ({ account_id: account_id === "none" ? null : account_id, ...v }))
         .sort((a, b) => b.value - a.value);
 }
-
