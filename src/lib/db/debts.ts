@@ -95,8 +95,11 @@ export async function getDebtFreedomStats(): Promise<DebtFreedomStats> {
     const payments = txRes.data ?? [];
 
     const totalInitial = debts.reduce((s, d) => s + Number(d.total_amount), 0);
+    // "Aktif" di sini = active + overdue, samain sama definisi di halaman
+    // /debts (lihat `active` di debts/page.tsx) — utang telat tetep punya
+    // sisa yang harus dibayar, jangan sampai ke-skip dari total.
     const totalRemaining = debts
-        .filter((d) => d.status === "active")
+        .filter((d) => d.status === "active" || d.status === "overdue")
         .reduce((s, d) => s + Number(d.remaining), 0);
     const totalPaidAllTime = Math.max(0, totalInitial - totalRemaining);
     const percentPaid = totalInitial > 0 ? Math.min(100, (totalPaidAllTime / totalInitial) * 100) : 0;
@@ -122,7 +125,7 @@ export async function getDebtFreedomStats(): Promise<DebtFreedomStats> {
     // sebagai estimasi minimum pace, lebih masuk akal daripada 0.
     if (avgMonthlyPayment <= 0) {
         const installmentTotal = debts
-            .filter((d) => d.status === "active" && d.is_installment)
+            .filter((d) => (d.status === "active" || d.status === "overdue") && d.is_installment)
             .reduce((s, d) => s + Number(d.installment_amount ?? 0), 0);
         if (installmentTotal > 0) {
             avgMonthlyPayment = installmentTotal;
@@ -144,7 +147,7 @@ export async function getDebtTrendData() {
     ]);
 
     const currentTotalRemaining = (debtRes.data ?? [])
-        .filter((d) => d.status === "active")
+        .filter((d) => d.status === "active" || d.status === "overdue")
         .reduce((s, d) => s + Number(d.remaining), 0);
 
     const payments = txRes.data ?? [];
